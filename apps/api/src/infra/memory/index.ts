@@ -1,0 +1,358 @@
+/* eslint-disable @typescript-eslint/require-await */
+import { randomUUID } from 'node:crypto';
+import type {
+  AuditEntry,
+  Order,
+  Reservation,
+  SettingsRecord,
+  User,
+} from '../../domain/entities.js';
+import type {
+  AuditRepository,
+  NewOrder,
+  NewReservation,
+  NewUser,
+  OrderRepository,
+  OrderSearchQuery,
+  OtpChallenge,
+  OtpRepository,
+  Repositories,
+  ReservationRepository,
+  Session,
+  SessionRepository,
+  SettingsRepository,
+  SmsSender,
+  UserRepository,
+} from '../../ports.js';
+import { ACTIVE_RESERVATION_STATUSES } from '@benzin/shared';
+
+/**
+ * In-memory repositories. They exist for unit/e2e tests and for `pnpm dev` without Docker.
+ * The API refuses to boot on them when NODE_ENV=production. Every mutating method that the
+ * domain relies on for correctness (order transition, reservation creation) is atomic here,
+ * because JavaScript runs the critical section to completion without interleaving.
+ */
+
+const clone = <T>(value: T): T => structuredClone(value);
+
+export class MemoryUserRepository implements UserRepository {
+  private readonly byId = new Map<string, User>();
+  private byPhone = new Map<string, string>();
+
+  async findById(id: string): Promise<User | null> {
+    const user = this.byId.get(id);
+    return user ? clone(user) : null;
+  }
+
+  async findByPhone(phone: string): Promise<User | null> {
+    const id = this.byPhone.get(phone);
+    return id ? this.findById(id) : null;
+  }
+
+  async create(input: NewUser): Promise<User> {
+    const user: User = {
+      id: randomUUID(),
+      phone: input.phone,
+      displayName: null,
+      role: input.role ?? 'USER',
+      status: 'ACTIVE',
+      createdAt: new Date(),
+    };
+    this.byId.set(user.id, clone(user));
+    this.byPhone.set(user.phone, user.id);
+    return user;
+  }
+
+  async save(user: User): Promise<User> {
+    this.byId.set(user.id, clone(user));
+    this.byPhone.set(user.phone, user.id);
+    return clone(user);
+  }
+
+  async list(limit: number): Promise<User[]> {
+    return [...this.byId.values()].slice(0, limit).map(clone);
+  }
+}
+
+export class MemoryOtpRepository implements OtpRepository {
+  private readonly byPhone = new Map<string, OtpChallenge>();
+
+  async findLatest(phone: string): Promise<OtpChallenge | null> {
+    const challenge = this.byPhone.get(phone);
+    return challenge ? clone(challenge) : null;
+  }
+
+  async save(challenge: OtpChallenge): Promise<void> {
+    this.byPhone.set(challenge.phone, clone(challenge));
+  }
+}
+
+export class MemorySessionRepository implements SessionRepository {
+  private readonly byToken = new Map<string, Session>();
+
+  async create(userId: string, expiresAt: Date): Promise<Session> {
+    const session: Session = {
+      token: randomUUID().replace(/-/g, '') + randomUUID().replace(/-/g, ''),
+      userId,
+      expiresAt,
+      revokedAt: null,
+    };
+    this.byToken.set(session.token, session);
+    return clone(session);
+  }
+
+  async find(token: string): Promise<Session | null> {
+    const session = this.byToken.get(token);
+    return session ? clone(session) : null;
+  }
+
+  async revoke(token: string): Promise<void> {
+    const session = this.byToken.get(token);
+    if (session) this.byToken.set(token, { ...session, revokedAt: new Date() });
+  }
+}
+
+export class MemoryOrderRepository implements OrderRepository {
+  private readonly byId = new Map<string, Order>();
+
+  async create(input: NewOrder): Promise<Order> {
+    const now = new Date();
+    const order: Order = {
+      id: randomUUID(),
+      ownerId: input.ownerId,
+      side: input.side,
+      tier: input.tier,
+      litres: input.litres,
+      rateToman: input.rateToman,
+      zoneId: input.zoneId,
+      stationName: input.stationName,
+      note: input.note,
+      lat: input.lat,
+      lng: input.lng,
+      deliveryMethod: input.deliveryMethod,
+      status: 'OPEN',
+      expiresAt: input.expiresAt,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.byId.set(order.id, clone(order));
+    return order;
+  }
+
+  async findById(id: string): Promise<Order | null> {
+    const order = this.byId.get(id);
+    return order ? clone(order) : null;
+  }
+
+  async search(query: OrderSearchQuery): Promise<{ items: Order[]; total: number }> {
+    const matches = [...this.byId.values()].filter(
+      (order) =>
+        order.status === 'OPEN' &&
+        order.zoneId === query.zoneId &&
+        order.side === query.side &&
+        order.tier === query.tier &&
+        order.expiresAt.getTime() > query.now.getTime(),
+    );
+
+    const withDistance = matches.map((order) => {
+      if (!query.origin || order.lat === null || order.lng === null) return { order, km: Infinity };
+      return { order, km: haversineKm(query.origin!, { lat: order.lat, lng: order.lng }) };
+    });
+
+    const filtered =
+      query.origin && query.radiusKm !== null
+        ? withDistance.filter((entry) => entry.km <= query.radiusKm!)
+        : withDistance;
+
+    filtered.sort((a, b) => {
+      if (query.sort === 'price') return a.order.rateToman - b.order.rateToman;
+      if (query.sort === 'newest') return b.order.createdAt.getTime() - a.order.createdAt.getTime();
+      return a.km - b.km;
+    });
+
+    return {
+      items: filtered.slice(query.offset, query.offset + query.limit).map((e) => clone(e.order)),
+      total: filtered.length,
+    };
+  }
+
+  async listByOwner(ownerId: string, limit: number): Promise<Order[]> {
+    return [...this.byId.values()]
+      .filter((order) => order.ownerId === ownerId)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(0, limit)
+      .map(clone);
+  }
+
+  async countOpenByOwner(ownerId: string, now: Date): Promise<number> {
+    return [...this.byId.values()].filter(
+      (order) =>
+        order.ownerId === ownerId &&
+        (order.status === 'OPEN' || order.status === 'RESERVED') &&
+        order.expiresAt.getTime() > now.getTime(),
+    ).length;
+  }
+
+  async transition(
+    id: string,
+    expected: Order['status'],
+    next: Order['status'],
+    patch?: Partial<Pick<Order, 'updatedAt'>>,
+  ): Promise<Order | null> {
+    const current = this.byId.get(id);
+    if (!current || current.status !== expected) return null;
+    const updated: Order = { ...current, status: next, updatedAt: patch?.updatedAt ?? new Date() };
+    this.byId.set(id, clone(updated));
+    return clone(updated);
+  }
+
+  async listExpired(now: Date, limit: number): Promise<Order[]> {
+    return [...this.byId.values()]
+      .filter((order) => order.status === 'OPEN' && order.expiresAt.getTime() <= now.getTime())
+      .slice(0, limit)
+      .map(clone);
+  }
+}
+
+export class MemoryReservationRepository implements ReservationRepository {
+  private readonly byId = new Map<string, Reservation>();
+
+  private isActive(reservation: Reservation): boolean {
+    return ACTIVE_RESERVATION_STATUSES.includes(reservation.status);
+  }
+
+  async findById(id: string): Promise<Reservation | null> {
+    const reservation = this.byId.get(id);
+    return reservation ? clone(reservation) : null;
+  }
+
+  async findActiveByOrder(orderId: string): Promise<Reservation | null> {
+    for (const reservation of this.byId.values()) {
+      if (reservation.orderId === orderId && this.isActive(reservation)) return clone(reservation);
+    }
+    return null;
+  }
+
+  async findActiveByTaker(takerId: string): Promise<Reservation[]> {
+    return [...this.byId.values()]
+      .filter((reservation) => reservation.takerId === takerId && this.isActive(reservation))
+      .map(clone);
+  }
+
+  async countActiveByTaker(takerId: string): Promise<number> {
+    return (await this.findActiveByTaker(takerId)).length;
+  }
+
+  async listByTaker(takerId: string, limit: number): Promise<Reservation[]> {
+    return [...this.byId.values()]
+      .filter((reservation) => reservation.takerId === takerId)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(0, limit)
+      .map(clone);
+  }
+
+  async createExclusive(input: NewReservation): Promise<Reservation | null> {
+    // Critical section: no await between the check and the insert.
+    if (await this.findActiveByOrder(input.orderId)) return null;
+    const reservation: Reservation = {
+      id: input.id,
+      orderId: input.orderId,
+      takerId: input.takerId,
+      status: 'PENDING_OWNER',
+      createdAt: new Date(),
+      expiresAt: input.expiresAt,
+      decidedAt: null,
+      completedAt: null,
+      cancelReason: null,
+    };
+    this.byId.set(reservation.id, clone(reservation));
+    return clone(reservation);
+  }
+
+  async transition(
+    id: string,
+    expected: Reservation['status'],
+    next: Reservation['status'],
+    patch?: Partial<Pick<Reservation, 'decidedAt' | 'completedAt' | 'cancelReason'>>,
+  ): Promise<Reservation | null> {
+    const current = this.byId.get(id);
+    if (!current || current.status !== expected) return null;
+    const updated: Reservation = { ...current, ...patch, status: next };
+    this.byId.set(id, clone(updated));
+    return clone(updated);
+  }
+
+  async listExpiredPending(now: Date, limit: number): Promise<Reservation[]> {
+    return [...this.byId.values()]
+      .filter((r) => r.status === 'PENDING_OWNER' && r.expiresAt.getTime() <= now.getTime())
+      .slice(0, limit)
+      .map(clone);
+  }
+
+  async listAll(limit: number): Promise<Reservation[]> {
+    return [...this.byId.values()].slice(0, limit).map(clone);
+  }
+}
+
+export class MemorySettingsRepository implements SettingsRepository {
+  private readonly byKey = new Map<string, SettingsRecord>();
+
+  async findAll(): Promise<SettingsRecord[]> {
+    return [...this.byKey.values()].map(clone);
+  }
+
+  async set(key: string, value: unknown, updatedBy: string | null): Promise<SettingsRecord> {
+    const record: SettingsRecord = { key, value, updatedAt: new Date(), updatedBy };
+    this.byKey.set(key, clone(record));
+    return record;
+  }
+}
+
+export class MemoryAuditRepository implements AuditRepository {
+  private readonly entries: AuditEntry[] = [];
+
+  async append(entry: Omit<AuditEntry, 'id' | 'createdAt'>): Promise<AuditEntry> {
+    const stored: AuditEntry = { ...entry, id: randomUUID(), createdAt: new Date() };
+    this.entries.unshift(stored);
+    return clone(stored);
+  }
+
+  async list(limit: number): Promise<AuditEntry[]> {
+    return this.entries.slice(0, limit).map(clone);
+  }
+}
+
+/** Development SMS sender: writes to the log so the OTP is visible without an account. */
+export class ConsoleSmsSender implements SmsSender {
+  constructor(private readonly logger: (message: string) => void = (m) => console.info(m)) {}
+
+  async send(phone: string, message: string): Promise<void> {
+    this.logger(`[sms] → ${phone}: ${message}`);
+  }
+}
+
+export function createMemoryRepositories(): Repositories {
+  return {
+    users: new MemoryUserRepository(),
+    otps: new MemoryOtpRepository(),
+    sessions: new MemorySessionRepository(),
+    orders: new MemoryOrderRepository(),
+    reservations: new MemoryReservationRepository(),
+    settings: new MemorySettingsRepository(),
+    audit: new MemoryAuditRepository(),
+  };
+}
+
+export function haversineKm(
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number },
+): number {
+  const R = 6371;
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}

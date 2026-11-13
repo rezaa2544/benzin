@@ -1,0 +1,68 @@
+# Local development stack. Production uses the same images behind Caddy on a single VPS.
+name: benzin
+
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: benzin
+      POSTGRES_PASSWORD: benzin
+      POSTGRES_DB: benzin
+    ports:
+      - '${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U benzin -d benzin']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '${REDIS_PORT:-6379}:6379'
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.api
+    environment:
+      NODE_ENV: development
+      API_PORT: 3000
+      DATABASE_URL: postgres://benzin:benzin@postgres:5432/benzin
+      REDIS_URL: redis://redis:6379
+      OTP_PEPPER: dev-otp-pepper-change-me
+      CORS_ORIGINS: http://localhost:5173,http://localhost:5174
+    ports:
+      - '${API_PORT:-3000}:3000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - '${CADDY_HTTP_PORT:-8080}:80'
+      - '${CADDY_HTTPS_PORT:-8443}:443'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  redisdata:
+  caddydata:

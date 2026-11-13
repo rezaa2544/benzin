@@ -1,1 +1,71 @@
-# benzin
+# بنزین · Benzin
+
+دوست‌یار خرید و فروش سهمیه سوخت. سهمیه آزاد سوخت خود را به کسی که نیاز دارد می‌رسانیم — با ثبت سفارش،
+رزرو، تأیید صاحب سفارش، چت و تسویه، و یک پنل مدیریت کامل.
+
+> **Benzin** is a marketplace for Iran's subsidised fuel quota: owners list their unused litres,
+> buyers reserve them, the owner accepts, both sides coordinate in-app and confirm the hand-over.
+> Persian UI, RTL, Jalali dates, Toman amounts — English code and commits.
+
+## وضعیت پروژه
+
+| قطعه                          | وضعیت                                                                              |
+| ----------------------------- | ---------------------------------------------------------------------------------- |
+| تابلوی وظایف (Notion «بنزین») | ۷۴ تسک در E0…E10 + ۱۰ تصمیم باز + Spike ارائه‌دهندگان                              |
+| `packages/shared`             | ✅ قواعد دامنه‌ی مشترک، اسکیمای Zod، تنظیمات پیش‌فرض، ماشین حالت، قالب‌بندی فارسی  |
+| `apps/api`                    | ✅ هسته‌ی API (Fastify): ورود با OTP، سفارش، رزرو، تکمیل، تنظیمات ادمین، لاگ ممیزی |
+| `infra/`                      | ✅ مهاجرت اولیه (Postgres 16 + PostGIS)، Docker Compose، Caddy، Dockerfile         |
+| `apps/web` / `apps/admin`     | ⏳ در انتظار E9-01/E9-02 (توکن‌ها و Style Guide با تأیید اسکرین‌شات)               |
+| آداپتور Postgres              | ⏳ مخزن‌های فعلی درون‌حافظه‌ای‌اند (فقط توسعه) — E2/E3                             |
+
+## شروع سریع
+
+```bash
+corepack enable && corepack prepare pnpm@9.15.4 --activate
+pnpm install
+pnpm -r build
+pnpm -r test
+
+# API روی http://localhost:3000 (بدون Docker، با مخزن درون‌حافظه‌ای)
+cp .env.example .env
+pnpm dev:api
+```
+
+```bash
+# کل استک (Postgres/PostGIS + Redis + API + Caddy)
+cd infra && docker compose up -d
+```
+
+### جریان ورود در محیط توسعه
+
+`POST /v1/auth/otp/request` با `{"phone":"09121234567"}` — کد پنج‌رقمی در لاگ API چاپ می‌شود
+(`[sms] → 0912…: کد ورود شما به بنزین: ۱۲۳۴۵`، ارقام لاتین). سپس
+`POST /v1/auth/otp/verify` با همان کد، یک توکن Bearer برمی‌گرداند.
+
+## معماری
+
+```
+apps/api        NestJS-style modular monolith on Fastify (domain → services → HTTP)
+apps/web        React 18 + Vite + Tailwind + shadcn/ui — PWA (iOS) + Capacitor (Android)
+apps/admin      پنل مدیریت، SPA جدا با همان Design System
+packages/shared enums, zod schemas, settings, state machines, Persian formatters
+infra           migrations, docker compose, Caddy, Dockerfile
+docs            brief, ADRs, assumptions, spike notes
+```
+
+قواعد ثابت: TypeScript سختگیر، بدون `any`، هر تغییر وضعیت از طریق ماشین حالت،
+همه‌ی متن‌های UI از فایل‌های i18n فارسی، هیچ رمزی در گیت.
+
+## مستندات
+
+- [`docs/BRIEF.md`](docs/BRIEF.md) — نقشه‌ی مهندسی برگرفته از Master Brief
+- [`docs/ASSUMPTIONS.md`](docs/ASSUMPTIONS.md) — فرض‌های ثبت‌شده (به‌جای حدس زدن)
+- [`docs/ADR/`](docs/ADR) — تصمیم‌های معماری
+- [`docs/SPIKE-001-providers.md`](docs/SPIKE-001-providers.md) — پیامک، درگاه، Push، نقشه
+- [`docs/TASKS.md`](docs/TASKS.md) — فهرست فازها؛ منبع حقیقت، تابلوی Notion است
+
+## قراردادها
+
+- شاخه‌ی هر تسک: `feat/E3-02-order-search`
+- کامیت: Conventional Commits، انگلیسی (`feat(orders): add cursor pagination`)
+- هر تسک: تست + Definition of Done، سپس PR و ادغام
