@@ -11,14 +11,27 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
-    "lint": "pnpm -r lint",
+    "lint": "eslint .",
     "dev:api": "pnpm --filter @benzin/api dev",
-    "dev:web": "pnpm --filter @benzin/web dev"
+    "dev:web": "pnpm --filter @benzin/web dev",
+    "format": "prettier --write \"**/*.{ts,tsx,json,md,yml,yaml,css}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,json,md,yml,yaml,css}\"",
+    "prepare": "husky",
+    "commitlint": "commitlint --edit"
   },
   "devDependencies": {
+    "@commitlint/cli": "^19.6.0",
+    "@commitlint/config-conventional": "^19.6.0",
+    "@eslint/js": "^9.17.0",
     "@types/node": "^22.10.2",
+    "drizzle-kit": "^0.30.1",
+    "eslint": "^9.17.0",
+    "eslint-config-prettier": "^9.1.0",
+    "lint-staged": "^15.2.11",
     "prettier": "^3.4.2",
     "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.0",
     "vitest": "^2.1.8"
-  }
+  },
+  "type": "module"
 }

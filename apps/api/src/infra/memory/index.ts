@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/require-await */
 import { randomUUID } from 'node:crypto';
 import type {
   AuditEntry,
