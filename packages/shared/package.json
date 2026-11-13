@@ -15,7 +15,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "lint": "echo 'lint via eslint (root) eventually'"
+    "lint": "eslint ."
   },
   "dependencies": {
     "zod": "^3.24.1"
