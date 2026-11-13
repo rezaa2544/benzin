@@ -1,0 +1,237 @@
+import cors from '@fastify/cors';
+import helmet from '@fastify/helmet';
+import Fastify, { type FastifyInstance } from 'fastify';
+import { ZodError } from 'zod';
+import {
+  AppError,
+  cancelReservationSchema,
+  createOrderSchema,
+  isAppError,
+  orderSearchSchema,
+  paginationSchema,
+  requestOtpSchema,
+  verifyOtpSchema,
+  fieldErrors,
+} from '@benzin/shared';
+import type { Config } from '../config.js';
+import type { Clock, User } from '../domain/entities.js';
+import type { Repositories, SmsSender } from '../ports.js';
+import { assertRole } from '../modules/auth-service.js';
+import { AuthService } from '../modules/auth-service.js';
+import { OrderService } from '../modules/orders-service.js';
+import { ReservationService } from '../modules/reservations-service.js';
+import { SettingsService } from '../modules/settings-service.js';
+import { authenticate, currentUser, parseInput, type AppServices } from './context.js';
+
+export interface BuildAppOptions {
+  config: Config;
+  repos: Repositories;
+  sms: SmsSender;
+  clock: Clock;
+}
+
+export interface BuiltApp {
+  app: FastifyInstance;
+  services: AppServices;
+}
+
+const toPublicUser = (user: User) => ({
+  id: user.id,
+  phone: user.phone,
+  displayName: user.displayName,
+  role: user.role,
+  createdAt: user.createdAt.toISOString(),
+});
+
+export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
+  const { config, repos, sms, clock } = options;
+  const settings = new SettingsService(repos);
+  const auth = new AuthService(repos, settings, sms, clock, config.OTP_PEPPER);
+  const orders = new OrderService(repos, settings, clock);
+  const reservations = new ReservationService(repos, settings, clock);
+  const services: AppServices = { auth, orders, reservations, settings };
+  const requireAuth = authenticate(auth);
+
+  const app = Fastify({
+    logger:
+      config.LOG_LEVEL === 'silent'
+        ? false
+        : { level: config.LOG_LEVEL, redact: ['req.headers.authorization'] },
+    trustProxy: true,
+    genReqId: () => crypto.randomUUID(),
+  });
+
+  await app.register(helmet, { contentSecurityPolicy: false });
+  await app.register(cors, {
+    origin: config.CORS_ORIGINS,
+    credentials: true,
+    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+  });
+
+  app.setErrorHandler((rawError: unknown, request, reply) => {
+    const error = rawError as { statusCode?: number; message?: string };
+    if (isAppError(rawError)) {
+      return reply.status(rawError.httpStatus).send({
+        error: {
+          code: rawError.code,
+          message: rawError.message,
+          details: rawError.details ?? null,
+          requestId: request.id,
+        },
+      });
+    }
+    if (rawError instanceof ZodError) {
+      return reply.status(422).send({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid input',
+          details: fieldErrors(rawError),
+          requestId: request.id,
+        },
+      });
+    }
+    const statusCode = (error as { statusCode?: number }).statusCode ?? 500;
+    if (statusCode >= 500) request.log.error({ err: rawError }, 'unhandled error');
+    return reply.status(statusCode).send({
+      error: {
+        code: statusCode >= 500 ? 'INTERNAL_ERROR' : 'VALIDATION_ERROR',
+        message:
+          statusCode >= 500 ? 'Unexpected server error' : (error.message ?? 'Request failed'),
+        details: null,
+        requestId: request.id,
+      },
+    });
+  });
+
+  app.get('/healthz', async () => ({ status: 'ok', uptimeSeconds: Math.round(process.uptime()) }));
+
+  app.get('/v1/meta/config', async () => {
+    const effective = await settings.get();
+    return {
+      otpTtlSeconds: effective['otp.ttl_seconds'],
+      otpLength: effective['otp.length'],
+      reservationTtlMinutes: effective['reservation.ttl_minutes'],
+      ownerDecisionTtlMinutes: effective['owner.decision_ttl_minutes'],
+      minLitres: effective['order.min_litres'],
+      maxLitres: effective['order.max_litres'],
+      maxActiveReservations: effective['reservation.max_active_per_user'],
+    };
+  });
+
+  // ---------------------------------------------------------------- auth
+  app.post('/v1/auth/otp/request', async (request, reply) => {
+    const body = parseInput(requestOtpSchema, request.body);
+    const result = await auth.requestOtp(body.phone);
+    return reply.status(202).send({
+      expiresAt: result.expiresAt.toISOString(),
+      cooldownSeconds: result.cooldownSeconds,
+    });
+  });
+
+  app.post('/v1/auth/otp/verify', async (request) => {
+    const body = parseInput(verifyOtpSchema, request.body);
+    const result = await auth.verifyOtp(body.phone, body.code);
+    return {
+      token: result.token,
+      expiresAt: result.expiresAt.toISOString(),
+      isNewUser: result.isNewUser,
+      user: toPublicUser(result.user),
+    };
+  });
+
+  app.post('/v1/auth/logout', { preHandler: requireAuth }, async (request, reply) => {
+    if (request.sessionToken) await auth.logout(request.sessionToken);
+    return reply.status(204).send();
+  });
+
+  app.get('/v1/me', { preHandler: requireAuth }, async (request) =>
+    toPublicUser(currentUser(request)),
+  );
+
+  // -------------------------------------------------------------- orders
+  app.get('/v1/orders', { preHandler: requireAuth }, async (request) => {
+    const query = parseInput(orderSearchSchema, request.query);
+    return orders.search(query);
+  });
+
+  app.post('/v1/orders', { preHandler: requireAuth }, async (request, reply) => {
+    const body = parseInput(createOrderSchema, request.body);
+    const created = await orders.create(currentUser(request), body);
+    return reply.status(201).send(created);
+  });
+
+  app.get('/v1/orders/mine', { preHandler: requireAuth }, async (request) => {
+    const query = parseInput(paginationSchema, request.query);
+    return { items: await orders.listMine(currentUser(request), query.limit) };
+  });
+
+  app.get('/v1/orders/:id', { preHandler: requireAuth }, async (request) => {
+    const { id } = request.params as { id: string };
+    return orders.getById(id);
+  });
+
+  app.post('/v1/orders/:id/cancel', { preHandler: requireAuth }, async (request) => {
+    const { id } = request.params as { id: string };
+    return orders.cancel(currentUser(request), id);
+  });
+
+  // -------------------------------------------------------- reservations
+  app.post('/v1/orders/:id/reservations', { preHandler: requireAuth }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const created = await reservations.request(currentUser(request), id);
+    return reply.status(201).send(created);
+  });
+
+  app.get('/v1/reservations/mine', { preHandler: requireAuth }, async (request) => {
+    const query = parseInput(paginationSchema, request.query);
+    return { items: await reservations.listMine(currentUser(request), query.limit) };
+  });
+
+  app.get('/v1/reservations/:id', { preHandler: requireAuth }, async (request) => {
+    const { id } = request.params as { id: string };
+    return reservations.get(currentUser(request), id);
+  });
+
+  app.post('/v1/reservations/:id/confirm', { preHandler: requireAuth }, async (request) => {
+    const { id } = request.params as { id: string };
+    return reservations.confirm(currentUser(request), id);
+  });
+
+  app.post('/v1/reservations/:id/reject', { preHandler: requireAuth }, async (request) => {
+    const { id } = request.params as { id: string };
+    return reservations.reject(currentUser(request), id);
+  });
+
+  app.post('/v1/reservations/:id/complete', { preHandler: requireAuth }, async (request) => {
+    const { id } = request.params as { id: string };
+    return reservations.complete(currentUser(request), id);
+  });
+
+  app.post('/v1/reservations/:id/cancel', { preHandler: requireAuth }, async (request) => {
+    const { id } = request.params as { id: string };
+    const body = parseInput(cancelReservationSchema, request.body ?? {});
+    return reservations.cancel(currentUser(request), id, body.reason);
+  });
+
+  // ------------------------------------------------------------- admin
+  app.get('/v1/admin/settings', { preHandler: requireAuth }, async (request) => {
+    assertRole(currentUser(request), ['ADMIN', 'OWNER']);
+    return { settings: await settings.get() };
+  });
+
+  app.patch('/v1/admin/settings', { preHandler: requireAuth }, async (request) => {
+    const user = currentUser(request);
+    assertRole(user, ['ADMIN', 'OWNER']);
+    const patch = request.body as Record<string, unknown> | undefined;
+    if (!patch || typeof patch !== 'object') throw AppError.validation('Body must be an object');
+    return { updated: await settings.update(user.id, patch) };
+  });
+
+  app.get('/v1/admin/audit', { preHandler: requireAuth }, async (request) => {
+    assertRole(currentUser(request), ['ADMIN', 'OWNER']);
+    const query = parseInput(paginationSchema, request.query);
+    return { items: await repos.audit.list(query.limit) };
+  });
+
+  return { app, services };
+}

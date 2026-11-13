@@ -1,0 +1,32 @@
+# Single-origin edge: the SPA, the admin panel and the API share one origin,
+# so the browser never needs CORS in production and preview origins keep working.
+{
+  auto_https off
+}
+
+:80 {
+  encode zstd gzip
+
+  handle /v1/* {
+    reverse_proxy api:3000
+  }
+
+  handle /healthz {
+    reverse_proxy api:3000
+  }
+
+  handle /admin/* {
+    uri strip_prefix /admin
+    reverse_proxy admin:4173
+  }
+
+  handle {
+    reverse_proxy web:4173
+  }
+
+  header {
+    X-Content-Type-Options nosniff
+    Referrer-Policy strict-origin-when-cross-origin
+    X-Frame-Options SAMEORIGIN
+  }
+}
