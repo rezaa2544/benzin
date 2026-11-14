@@ -45,6 +45,13 @@ services:
       CORS_ORIGINS: http://localhost:5173,http://localhost:5174
     ports:
       - '${API_PORT:-3000}:3000'
+    # The image is distroless-ish (no curl): busybox `wget` is already in node:22-alpine.
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:3000/healthz >/dev/null || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
     depends_on:
       postgres:
         condition: service_healthy
@@ -58,7 +65,19 @@ services:
     ports:
       - '${ADMIN_PORT:-4173}:4173'
     depends_on:
-      - api
+      api:
+        condition: service_healthy
+
+  # Customer app (E9-15): the PWA needs a same-origin host, so Caddy proxies `/` here.
+  web:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.web
+    ports:
+      - '${WEB_PORT:-4174}:4173'
+    depends_on:
+      api:
+        condition: service_healthy
 
   caddy:
     image: caddy:2-alpine
@@ -69,8 +88,12 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddydata:/data
     depends_on:
-      - api
-      - admin
+      api:
+        condition: service_healthy
+      admin:
+        condition: service_started
+      web:
+        condition: service_started
 
 volumes:
   pgdata:
