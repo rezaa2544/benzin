@@ -14,6 +14,8 @@ export interface AppShellProps {
   theme?: ThemeMode;
   onToggleTheme?: () => void;
   headerAction?: ReactNode;
+  /** Shows the offline strip under the header (E9-15); online-only data stays stale until reconnect. */
+  offline?: boolean;
 }
 
 /**
@@ -30,6 +32,7 @@ export function AppShell({
   theme,
   onToggleTheme,
   headerAction,
+  offline = false,
 }: AppShellProps): JSX.Element {
   return (
     <div className="min-h-dvh bg-bg">
@@ -60,6 +63,14 @@ export function AppShell({
           </div>
         </div>
       </header>
+
+      {offline ? (
+        <div role="status" className="border-b border-warning/30 bg-warning/10">
+          <p className="phone-frame py-1.5 text-center text-xs font-medium text-warning">
+            {t('offline.banner')}
+          </p>
+        </div>
+      ) : null}
 
       <main
         className="phone-frame py-4"

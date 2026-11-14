@@ -19,6 +19,7 @@ import {
   type ThemeMode,
 } from './lib/theme.js';
 import { t } from './lib/i18n.js';
+import { readOnline, subscribeOnline } from './lib/pwa.js';
 import type { AuthResult, MetaConfig, ZoneView } from './lib/types.js';
 import { AppShell } from './components/AppShell.js';
 import type { NavKey } from './components/BottomNav.js';
@@ -66,6 +67,9 @@ export function App(): JSX.Element {
   const [mode, setMode] = useState<ThemeMode>(() =>
     readTheme(typeof window === 'undefined' ? undefined : window.localStorage),
   );
+  const [online, setOnline] = useState(() =>
+    typeof navigator === 'undefined' ? true : readOnline({ navigator }),
+  );
   const [prefersDark, setPrefersDark] = useState(
     () => typeof window !== 'undefined' && window.matchMedia(MEDIA).matches,
   );
@@ -91,6 +95,14 @@ export function App(): JSX.Element {
       }),
     [logout],
   );
+
+  // ---------------------------------------------------------------- network
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const sync = (): void => setOnline(readOnline(window));
+    sync();
+    return subscribeOnline(window, sync);
+  }, []);
 
   // ---------------------------------------------------------------- theme
   useEffect(() => {
@@ -175,7 +187,7 @@ export function App(): JSX.Element {
   // ---------------------------------------------------------------- render
   if (!route) {
     return (
-      <AppShell theme={mode} onToggleTheme={toggleTheme}>
+      <AppShell theme={mode} onToggleTheme={toggleTheme} offline={!online}>
         <Notice tone="error">{t('errors.NOT_FOUND')}</Notice>
       </AppShell>
     );
@@ -216,6 +228,7 @@ export function App(): JSX.Element {
       theme={mode}
       onToggleTheme={toggleTheme}
       hideNav={route.name === 'chat'}
+      offline={!online}
       onNavigate={(_key, href) => navigate(href)}
       headerAction={
         unread > 0 ? (
