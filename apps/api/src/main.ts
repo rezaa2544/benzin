@@ -2,6 +2,7 @@ import { buildApp } from './http/app.js';
 import { loadConfig } from './config.js';
 import { ConsoleSmsSender, createMemoryRepositories } from './infra/memory/index.js';
 import { systemClock } from './domain/entities.js';
+import { applySeed } from './infra/db/seed.js';
 
 const config = loadConfig();
 
@@ -18,6 +19,8 @@ if (config.NODE_ENV === 'production') {
 }
 
 const repos = createMemoryRepositories();
+// Development/tests only: make the app usable immediately (Baneh zone, plans, settings).
+await applySeed(repos);
 const { app } = await buildApp({
   config,
   repos,

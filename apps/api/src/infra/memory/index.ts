@@ -28,6 +28,7 @@ import type {
   UserRepository,
 } from '../../ports.js';
 import { ACTIVE_RESERVATION_STATUSES } from '@benzin/shared';
+import { MemoryZoneRepository } from './zones.js';
 
 /**
  * In-memory repositories. They exist for unit/e2e tests and for `pnpm dev` without Docker.
@@ -413,6 +414,7 @@ export function createMemoryRepositories(): Repositories {
     orders: new MemoryOrderRepository(),
     reservations: new MemoryReservationRepository(),
     settings: new MemorySettingsRepository(),
+    zones: new MemoryZoneRepository(),
     audit: new MemoryAuditRepository(),
   };
 }

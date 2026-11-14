@@ -60,7 +60,7 @@ const decodeCursor = (cursor: string | undefined): number => {
 
 export class OrderService {
   constructor(
-    private readonly repos: Pick<Repositories, 'orders' | 'audit'>,
+    private readonly repos: Pick<Repositories, 'orders' | 'audit' | 'zones'>,
     private readonly settings: SettingsService,
     private readonly clock: Clock,
   ) {}
@@ -80,6 +80,13 @@ export class OrderService {
         officialRateToman: TIER_RATE_TOMAN[input.tier],
       });
     }
+    const zone = await this.repos.zones.findById(input.zoneId);
+    if (!zone || !zone.isActive) {
+      throw new AppError('ZONE_NOT_SUPPORTED', 422, 'Zone is not served yet', {
+        zoneId: input.zoneId,
+      });
+    }
+
     const openOrders = await this.repos.orders.countOpenByOwner(user.id, now);
     if (openOrders >= config['order.max_open_per_user']) {
       throw new AppError('ORDER_LIMIT_REACHED', 429, 'Too many open orders', {

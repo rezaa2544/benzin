@@ -14,6 +14,7 @@ import type {
   Reservation,
   SettingsRecord,
   User,
+  ZoneRecord,
 } from './domain/entities.js';
 
 export interface NewUser {
@@ -146,6 +147,15 @@ export interface ReservationRepository {
   listAll(limit: number): Promise<Reservation[]>;
 }
 
+export interface ZoneRepository {
+  /** The active zone whose polygon contains the point, or null when out of coverage. */
+  findByPoint(point: { lat: number; lng: number }): Promise<ZoneRecord | null>;
+  findById(id: string): Promise<ZoneRecord | null>;
+  findBySlug(slug: string): Promise<ZoneRecord | null>;
+  listActive(): Promise<ZoneRecord[]>;
+  upsert(zone: ZoneRecord): Promise<ZoneRecord>;
+}
+
 export interface SettingsRepository {
   findAll(): Promise<SettingsRecord[]>;
   set(key: string, value: unknown, updatedBy: string | null): Promise<SettingsRecord>;
@@ -173,6 +183,7 @@ export interface Repositories {
   orders: OrderRepository;
   reservations: ReservationRepository;
   settings: SettingsRepository;
+  zones: ZoneRepository;
   audit: AuditRepository;
 }
 
