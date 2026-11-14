@@ -1,0 +1,27 @@
+name: Debug tests
+on: push
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r build
+      - run: |
+          set +e
+          pnpm -r test > /tmp/out.txt 2>&1
+          echo "EXIT=$?" >> /tmp/out.txt
+          tail -c 5000 /tmp/out.txt > /tmp/body.txt
+          gh pr comment 14 --body-file /tmp/body.txt || gh pr comment 14 --body "log unavailable"
+        env:
+          GH_TOKEN: ${{ github.token }}
