@@ -53,6 +53,19 @@ export const RESERVATION_STATUSES = [
 ] as const;
 export type ReservationStatus = (typeof RESERVATION_STATUSES)[number];
 
+/** Persian copy for reservation states, shared by the app, the admin panel and notices. */
+export const RESERVATION_STATUS_FA: Record<ReservationStatus, string> = {
+  PENDING_OWNER: 'در انتظار تأیید صاحب سفارش',
+  CONFIRMED: 'تأیید شده',
+  COMPLETED: 'تکمیل شده',
+  AUTO_COMPLETED: 'تکمیل خودکار',
+  DISPUTED: 'در اختلاف',
+  EXPIRED: 'منقضی',
+  CANCELLED_BY_TAKER: 'لغو شده توسط خریدار',
+  CANCELLED_BY_OWNER: 'لغو شده توسط صاحب سفارش',
+  REJECTED: 'رد شده',
+};
+
 export const ACTIVE_RESERVATION_STATUSES: readonly ReservationStatus[] = [
   'PENDING_OWNER',
   'CONFIRMED',

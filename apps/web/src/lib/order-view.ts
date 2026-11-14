@@ -14,8 +14,9 @@ export interface OrderCardInput {
   status: OrderStatus;
   litres: number;
   rateToman: number;
-  zoneName: string;
+  zoneName?: string;
   ownerName?: string;
+  distanceKm?: number;
   score?: number;
 }
 
@@ -25,7 +26,7 @@ export interface OrderCardView {
   litres: string;
   rate: string;
   total: string;
-  zoneName: string;
+  zoneName: string | null;
   ownerName: string | null;
   /** SELL offers green, BUY requests amber — used for the card's start border. */
   tone: 'brand' | 'accent';
@@ -44,7 +45,7 @@ export function orderCardView(order: OrderCardInput): OrderCardView {
     litres: formatLitres(order.litres),
     rate: formatRate(order.rateToman),
     total: formatToman(total),
-    zoneName: order.zoneName,
+    zoneName: order.zoneName ?? null,
     ownerName: order.ownerName ?? null,
     tone: order.side === 'SELL' ? 'brand' : 'accent',
   };

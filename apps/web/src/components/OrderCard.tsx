@@ -1,5 +1,5 @@
 import type { OrderSide, OrderStatus } from '@benzin/shared';
-import { formatJalaliTime } from '@benzin/shared';
+import { formatJalaliTime, toPersianDigits } from '@benzin/shared';
 import { orderCardView } from '../lib/order-view.js';
 import { t } from '../lib/i18n.js';
 import { PriceTag } from './PriceTag.js';
@@ -11,8 +11,9 @@ export interface OrderCardProps {
   status: OrderStatus;
   litres: number;
   rateToman: number;
-  zoneName: string;
+  zoneName?: string;
   ownerName?: string;
+  distanceKm?: number;
   score?: number;
   expiresAt?: string | null;
   onOpen?: () => void;
@@ -30,6 +31,7 @@ export function OrderCard({
   zoneName,
   ownerName,
   score,
+  distanceKm,
   expiresAt,
   onOpen,
 }: OrderCardProps): JSX.Element {
@@ -41,7 +43,7 @@ export function OrderCard({
       type="button"
       onClick={onOpen}
       className={`card w-full border-s-4 ${accent} text-start transition duration-fast hover:bg-surface2`}
-      aria-label={`${view.side} ${view.litres} ${t('order.zone')} ${view.zoneName}`}
+      aria-label={`${view.side} ${view.litres} ${view.status}`}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex flex-col gap-1">
@@ -60,10 +62,18 @@ export function OrderCard({
             <span className="text-muted">{t('common.litre')}</span>
           </div>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
-            <span className="inline-flex items-center gap-1">
-              <Icon name="market" size={14} />
-              {view.zoneName}
-            </span>
+            {view.zoneName ? (
+              <span className="inline-flex items-center gap-1">
+                <Icon name="market" size={14} />
+                {view.zoneName}
+              </span>
+            ) : null}
+            {distanceKm !== undefined ? (
+              <span className="inline-flex items-center gap-1 tnum">
+                <Icon name="timer" size={14} />
+                {t('market.distance').replace('{km}', toPersianDigits(distanceKm.toFixed(1)))}
+              </span>
+            ) : null}
             {ownerName ? <span>{ownerName}</span> : null}
             {score !== undefined ? <TierBadge score={score} /> : null}
             {expiresAt ? (
