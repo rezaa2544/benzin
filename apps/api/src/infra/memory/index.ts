@@ -28,6 +28,8 @@ import type {
   UserRepository,
 } from '../../ports.js';
 import { ACTIVE_RESERVATION_STATUSES } from '@benzin/shared';
+import { MemoryConversationRepository, MemoryMessageRepository } from './chat.js';
+import { MemoryNotificationRepository } from './notifications.js';
 import { MemoryZoneRepository } from './zones.js';
 
 /**
@@ -383,6 +385,14 @@ export class MemoryReservationRepository implements ReservationRepository {
       .map(clone);
   }
 
+  async listByOrder(orderId: string, limit: number): Promise<Reservation[]> {
+    return [...this.byId.values()]
+      .filter((reservation) => reservation.orderId === orderId)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(0, limit)
+      .map(clone);
+  }
+
   async listAll(limit: number): Promise<Reservation[]> {
     return [...this.byId.values()].slice(0, limit).map(clone);
   }
@@ -426,13 +436,18 @@ export class ConsoleSmsSender implements SmsSender {
 }
 
 export function createMemoryRepositories(): Repositories {
+  const orders = new MemoryOrderRepository();
+  const reservations = new MemoryReservationRepository();
   return {
     users: new MemoryUserRepository(),
+    conversations: new MemoryConversationRepository(orders, reservations),
+    messages: new MemoryMessageRepository(),
+    notifications: new MemoryNotificationRepository(),
     otps: new MemoryOtpRepository(),
     refreshTokens: new MemoryRefreshTokenRepository(),
     devices: new MemoryDeviceRepository(),
-    orders: new MemoryOrderRepository(),
-    reservations: new MemoryReservationRepository(),
+    orders,
+    reservations,
     settings: new MemorySettingsRepository(),
     zones: new MemoryZoneRepository(),
     audit: new MemoryAuditRepository(),

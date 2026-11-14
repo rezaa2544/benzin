@@ -184,7 +184,10 @@ describe('E4 — concurrency, timers, cycle gate, contact disclosure and dispute
       headers: auth(taker),
     });
     expect(tooEarly.statusCode).toBe(409);
-    expect(tooEarly.body).not.toContain('09');
+    // No phone-shaped string anywhere in the refusal (requestId digits must not trip this).
+    expect(tooEarly.body).not.toMatch(/09\d{9}/);
+    expect((tooEarly.json() as Record<string, unknown>).owner).toBeUndefined();
+    expect((tooEarly.json() as Record<string, unknown>).taker).toBeUndefined();
 
     await decide(owner, reservation.id, 'confirm');
 

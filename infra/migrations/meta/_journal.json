@@ -15,6 +15,13 @@
       "when": 1794627977371,
       "tag": "0001_refresh_token_family",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794629997967,
+      "tag": "0002_chat_kinds",
+      "breakpoints": true
     }
   ]
 }

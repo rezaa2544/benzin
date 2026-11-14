@@ -1,11 +1,13 @@
 import {
   AppError,
+  CANCEL_REASON_FA,
   nextOrderStatus,
   nextReservationStatus,
   type CancelReason,
+  type Settings,
 } from '@benzin/shared';
 import type { Clock, Order, Reservation, User } from '../domain/entities.js';
-import type { Repositories } from '../ports.js';
+import { NOOP_NOTIFIER, type NotificationEmitter, type Repositories } from '../ports.js';
 import type { SettingsService } from './settings-service.js';
 
 export interface ReservationView {
@@ -37,7 +39,18 @@ export class ReservationService {
     private readonly repos: Pick<Repositories, 'orders' | 'reservations' | 'audit' | 'users'>,
     private readonly settings: SettingsService,
     private readonly clock: Clock,
+    private readonly notifier: NotificationEmitter = NOOP_NOTIFIER,
   ) {}
+
+  /** Sends one Persian notification; a notifier failure must never fail the trade. */
+  private async notify(
+    userId: string,
+    kind: Parameters<NotificationEmitter['emit']>[0]['kind'],
+    params: Record<string, string | number>,
+    payload: Record<string, unknown> = {},
+  ): Promise<void> {
+    await this.notifier.emit({ userId, kind, params, payload });
+  }
 
   private async load(id: string): Promise<{ reservation: Reservation; order: Order }> {
     const reservation = await this.repos.reservations.findById(id);
@@ -97,6 +110,12 @@ export class ReservationService {
       entityId: reservation.id,
       metadata: { orderId },
     });
+    await this.notify(
+      order.ownerId,
+      'RESERVATION_REQUESTED',
+      { litres: order.litres, minutes: config['owner.decision_ttl_minutes'] },
+      { orderId, reservationId: reservation.id },
+    );
     return toReservationView(reservation);
   }
 
@@ -118,7 +137,7 @@ export class ReservationService {
     }
     const now = this.clock.now();
     if (reservation.expiresAt.getTime() <= now.getTime()) {
-      await this.expireOne(reservation, order);
+      await this.expireOne(reservation, order, this.currentDecisionTtl(await this.settings.get()));
       throw new AppError('RESERVATION_NOT_ACTIVE', 409, 'Reservation expired');
     }
 
@@ -139,6 +158,12 @@ export class ReservationService {
       entityId: id,
       metadata: { orderId: order.id },
     });
+    await this.notify(
+      reservation.takerId,
+      'RESERVATION_CONFIRMED',
+      { litres: order.litres },
+      { orderId: order.id, reservationId: id },
+    );
     return toReservationView(updated);
   }
 
@@ -160,6 +185,12 @@ export class ReservationService {
       entityId: id,
       metadata: {},
     });
+    await this.notify(
+      reservation.takerId,
+      'RESERVATION_REJECTED',
+      { litres: order.litres },
+      { orderId: order.id, reservationId: id },
+    );
     return toReservationView(updated);
   }
 
@@ -189,6 +220,17 @@ export class ReservationService {
       entityId: id,
       metadata: { reason, by: actorKind },
     });
+    const peerId = isOwner ? reservation.takerId : order.ownerId;
+    await this.notify(
+      peerId,
+      'RESERVATION_CANCELLED',
+      {
+        by: isOwner ? 'صاحب سفارش' : 'خریدار',
+        litres: order.litres,
+        reason: CANCEL_REASON_FA[reason],
+      },
+      { orderId: order.id, reservationId: id },
+    );
     return toReservationView(updated);
   }
 
@@ -212,6 +254,12 @@ export class ReservationService {
       entityId: id,
       metadata: { by: actorKind },
     });
+    await this.notify(
+      actorKind === 'TAKER' ? order.ownerId : reservation.takerId,
+      'TRADE_COMPLETED',
+      { litres: order.litres, rateToman: order.rateToman },
+      { orderId: order.id, reservationId: id },
+    );
     return toReservationView(updated);
   }
 
@@ -293,6 +341,18 @@ export class ReservationService {
       entityId: id,
       metadata: { orderId: order.id, by: actorKind, reason },
     });
+    const recipients =
+      actorKind === 'ADMIN'
+        ? [order.ownerId, reservation.takerId]
+        : [actorKind === 'OWNER' ? reservation.takerId : order.ownerId];
+    for (const recipient of recipients) {
+      await this.notify(
+        recipient,
+        'DISPUTE_OPENED',
+        { litres: order.litres },
+        { orderId: order.id, reservationId: id, reason },
+      );
+    }
     return toReservationView(updated);
   }
 
@@ -301,13 +361,20 @@ export class ReservationService {
     return reservations.map(toReservationView);
   }
 
-  private async expireOne(reservation: Reservation, order: Order): Promise<void> {
+  private async expireOne(reservation: Reservation, order: Order, minutes: number): Promise<void> {
     const expired = await this.repos.reservations.transition(
       reservation.id,
       'PENDING_OWNER',
       'EXPIRED',
     );
-    if (expired) await this.repos.orders.transition(order.id, 'RESERVED', 'OPEN');
+    if (!expired) return;
+    await this.repos.orders.transition(order.id, 'RESERVED', 'OPEN');
+    await this.notify(
+      reservation.takerId,
+      'RESERVATION_EXPIRED',
+      { litres: order.litres, minutes },
+      { orderId: order.id, reservationId: reservation.id },
+    );
   }
 
   /**
@@ -338,6 +405,17 @@ export class ReservationService {
         entityId: reservation.id,
         metadata: { orderId: reservation.orderId, hours: config['trade.auto_complete_hours'] },
       });
+      const order = await this.repos.orders.findById(reservation.orderId);
+      const litres = order?.litres ?? 0;
+      for (const userId of [order?.ownerId, reservation.takerId]) {
+        if (!userId) continue;
+        await this.notify(
+          userId,
+          'TRADE_AUTO_COMPLETED',
+          { litres, hours: config['trade.auto_complete_hours'] },
+          { orderId: reservation.orderId, reservationId: reservation.id },
+        );
+      }
       count += 1;
     }
     return count;
@@ -346,13 +424,18 @@ export class ReservationService {
   /** Releases orders whose owner-decision window elapsed. Called by the scheduler. */
   async expireDueReservations(limit = 200): Promise<number> {
     const due = await this.repos.reservations.listExpiredPending(this.clock.now(), limit);
+    const minutes = this.currentDecisionTtl(await this.settings.get());
     let count = 0;
     for (const reservation of due) {
       const order = await this.repos.orders.findById(reservation.orderId);
       if (!order) continue;
-      await this.expireOne(reservation, order);
+      await this.expireOne(reservation, order, minutes);
       count += 1;
     }
     return count;
+  }
+
+  private currentDecisionTtl(config: Settings): number {
+    return config['owner.decision_ttl_minutes'];
   }
 }

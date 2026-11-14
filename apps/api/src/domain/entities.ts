@@ -1,5 +1,8 @@
 import type {
   DeliveryMethod,
+  MessageKind,
+  NotificationChannel,
+  NotificationKind,
   OrderSide,
   OrderStatus,
   ReservationStatus,
@@ -47,6 +50,39 @@ export interface Reservation {
   decidedAt: Date | null;
   completedAt: Date | null;
   cancelReason: string | null;
+}
+
+/** One chat thread per order; both trade parties write into it (task E5-01). */
+export interface Conversation {
+  readonly id: string;
+  readonly orderId: string;
+  readonly createdAt: Date;
+  closedAt: Date | null;
+}
+
+export interface Message {
+  readonly id: string;
+  readonly conversationId: string;
+  readonly senderId: string;
+  readonly kind: MessageKind;
+  readonly body: string;
+  readonly clientMessageId: string | null;
+  readAt: Date | null;
+  readonly createdAt: Date;
+}
+
+/** In-app inbox row. `kind` links back to the Persian template that rendered it. */
+export interface NotificationRecord {
+  readonly id: string;
+  readonly userId: string;
+  readonly channel: NotificationChannel;
+  readonly kind: NotificationKind;
+  readonly titleFa: string;
+  readonly bodyFa: string;
+  readonly payload: Record<string, unknown>;
+  readAt: Date | null;
+  readonly sentAt: Date | null;
+  readonly createdAt: Date;
 }
 
 export interface ZoneRecord {

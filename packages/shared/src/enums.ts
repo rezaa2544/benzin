@@ -49,6 +49,13 @@ export type UserRole = (typeof USER_ROLES)[number];
 export const USER_STATUSES = ['ACTIVE', 'SUSPENDED', 'BANNED'] as const;
 export type UserStatus = (typeof USER_STATUSES)[number];
 
+/** Chat messages: free text, a deliberate contact card, or a system line. */
+export const MESSAGE_KINDS = ['TEXT', 'CONTACT', 'SYSTEM'] as const;
+export type MessageKind = (typeof MESSAGE_KINDS)[number];
+
+export const NOTIFICATION_CHANNELS = ['IN_APP', 'SMS', 'PUSH'] as const;
+export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
+
 export const PAYMENT_PROVIDERS = ['CARD_TO_CARD', 'GATEWAY'] as const;
 export type PaymentProvider = (typeof PAYMENT_PROVIDERS)[number];
 

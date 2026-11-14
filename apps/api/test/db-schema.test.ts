@@ -64,6 +64,29 @@ describe('generated migrations', () => {
     expect(line).toContain("WHERE status = 'OPEN'");
   });
 
+  // E5-01/E5-02: the message kind drives client rendering (text bubble vs contact card).
+  it('guards the chat message kind and keeps idempotency indexes', () => {
+    expect(sql).toContain(
+      'ALTER TABLE "messages" ADD COLUMN "kind" text DEFAULT \'TEXT\' NOT NULL',
+    );
+    expect(sql).toContain('"messages_kind_check"');
+    expect(sql).toMatch(/CHECK \("messages"\."kind" IN \('TEXT', 'CONTACT', 'SYSTEM'\)\)/);
+    expect(sql).toContain('CREATE UNIQUE INDEX "messages_conversation_client_idx"');
+    expect(sql).toContain('CREATE INDEX "messages_conversation_idx" ON "messages"');
+  });
+
+  // E5-03: the inbox filters unread rows per user, so the partial index must stay.
+  it('stores the notification template kind and the unread index', () => {
+    expect(sql).toContain(
+      'ALTER TABLE "notifications" ADD COLUMN "kind" text DEFAULT \'SYSTEM\' NOT NULL',
+    );
+    const unreadIndex = sql
+      .split('\n')
+      .find((row) => row.includes('"notifications_user_unread_idx"'))!;
+    expect(unreadIndex).toContain('("user_id","created_at")');
+    expect(unreadIndex).toContain('WHERE read_at IS NULL');
+  });
+
   it('declares the PostGIS extension before the geography columns', () => {
     const extensionAt = sql.indexOf('CREATE EXTENSION IF NOT EXISTS "postgis"');
     const geographyAt = sql.indexOf('geography(');

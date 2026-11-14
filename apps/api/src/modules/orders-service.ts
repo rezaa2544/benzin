@@ -9,7 +9,7 @@ import {
 import type { Clock, Order, User } from '../domain/entities.js';
 import { publicLocation, type PublicLocation } from '../domain/geo.js';
 import { buyerSavingToman, isAboveOfficialRate, orderTotalToman } from '../domain/pricing.js';
-import type { Repositories } from '../ports.js';
+import type { NotificationEmitter, Repositories } from '../ports.js';
 import type { DistanceService, RouteEstimate } from './distance-service.js';
 import { DistanceService as Distance } from './distance-service.js';
 import { LocationService } from './location-service.js';
@@ -75,6 +75,7 @@ export class OrderService {
     private readonly clock: Clock,
     private readonly distance: DistanceService = new Distance(null),
     private readonly locations: LocationService = new LocationService(repos.zones),
+    private readonly notifier: NotificationEmitter | null = null,
   ) {}
 
   async create(user: User, input: CreateOrderInput): Promise<OrderView> {
@@ -281,7 +282,15 @@ export class OrderService {
     let expired = 0;
     for (const order of due) {
       const updated = await this.repos.orders.transition(order.id, 'OPEN', 'EXPIRED');
-      if (updated) expired += 1;
+      if (!updated) continue;
+      expired += 1;
+      // The owner must hear that their listing left the market (task E5-03).
+      await this.notifier?.emit({
+        userId: order.ownerId,
+        kind: 'ORDER_EXPIRED',
+        params: { litres: order.litres },
+        payload: { orderId: order.id },
+      });
     }
     return expired;
   }

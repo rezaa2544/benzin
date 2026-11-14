@@ -1,4 +1,6 @@
 import type {
+  MessageKind,
+  NotificationKind,
   OrderSide,
   OrderStatus,
   ReservationStatus,
@@ -8,7 +10,10 @@ import type {
 } from '@benzin/shared';
 import type {
   AuditEntry,
+  Conversation,
   DeviceRecord,
+  Message,
+  NotificationRecord,
   Order,
   RefreshTokenRecord,
   Reservation,
@@ -152,8 +157,95 @@ export interface ReservationRepository {
     patch?: Partial<Pick<Reservation, 'decidedAt' | 'completedAt' | 'cancelReason'>>,
   ): Promise<Reservation | null>;
   listExpiredPending(now: Date, limit: number): Promise<Reservation[]>;
+  /** Every reservation of one order, newest first — chat access checks use this. */
+  listByOrder(orderId: string, limit: number): Promise<Reservation[]>;
   listAll(limit: number): Promise<Reservation[]>;
 }
+
+export interface NewMessage {
+  conversationId: string;
+  senderId: string;
+  kind: MessageKind;
+  body: string;
+  clientMessageId: string | null;
+}
+
+export interface ConversationRepository {
+  findById(id: string): Promise<Conversation | null>;
+  findByOrder(orderId: string): Promise<Conversation | null>;
+  /** Idempotent: one thread per order, created on first access. */
+  ensureForOrder(orderId: string, at: Date): Promise<Conversation>;
+  close(id: string, at: Date): Promise<Conversation | null>;
+  /** Threads the user takes part in, most recently active first. */
+  listByParticipant(userId: string, limit: number): Promise<Conversation[]>;
+}
+
+export interface MessageRepository {
+  /** Returns null when `clientMessageId` was already stored (idempotent retries). */
+  append(input: NewMessage, at: Date): Promise<Message | null>;
+  findByClientId(conversationId: string, clientMessageId: string): Promise<Message | null>;
+  listByConversation(
+    conversationId: string,
+    options: { after: Date | null; limit: number },
+  ): Promise<Message[]>;
+  lastMessage(conversationId: string): Promise<Message | null>;
+  /** Marks messages written by the other party as read; returns how many changed. */
+  markRead(conversationId: string, readerId: string, at: Date): Promise<number>;
+  countUnread(conversationId: string, readerId: string): Promise<number>;
+}
+
+export interface NewNotification {
+  userId: string;
+  channel: 'IN_APP' | 'SMS' | 'PUSH';
+  kind: NotificationKind;
+  titleFa: string;
+  bodyFa: string;
+  payload: Record<string, unknown>;
+  sentAt: Date | null;
+}
+
+export interface NotificationRepository {
+  create(input: NewNotification, at: Date): Promise<NotificationRecord>;
+  findById(id: string): Promise<NotificationRecord | null>;
+  listByUser(
+    userId: string,
+    options: { limit: number; unreadOnly: boolean },
+  ): Promise<NotificationRecord[]>;
+  countUnread(userId: string): Promise<number>;
+  markRead(id: string, userId: string, at: Date): Promise<NotificationRecord | null>;
+  markAllRead(userId: string, at: Date): Promise<number>;
+}
+
+/** Emitter port used by domain services to fan out domain events (task E5-03). */
+export interface NotificationEmitter {
+  emit(input: {
+    userId: string;
+    kind: NotificationKind;
+    params: Record<string, string | number>;
+    payload?: Record<string, unknown>;
+  }): Promise<unknown>;
+}
+
+/** Used by services in tests and tooling where fan-out is irrelevant. */
+export const NOOP_NOTIFIER: NotificationEmitter = {
+  emit: async () => undefined,
+};
+
+/**
+ * Push channel for real-time clients (task E5-01). The HTTP layer owns the transport;
+ * services only publish domain events, so an in-process hub or Redis fan-out both fit.
+ */
+export interface ChatEvent {
+  type: 'message.created' | 'conversation.closed';
+  conversationId: string;
+  payload: Record<string, unknown>;
+}
+
+export interface ChatEventPublisher {
+  publish(event: ChatEvent): void;
+}
+
+export const NOOP_CHAT_EVENTS: ChatEventPublisher = { publish: () => undefined };
 
 export interface ZoneRepository {
   /** The active zone whose polygon contains the point, or null when out of coverage. */
@@ -199,6 +291,9 @@ export interface IdGenerator {
 
 export interface Repositories {
   users: UserRepository;
+  conversations: ConversationRepository;
+  messages: MessageRepository;
+  notifications: NotificationRepository;
   otps: OtpRepository;
   refreshTokens: RefreshTokenRepository;
   devices: DeviceRepository;

@@ -138,6 +138,71 @@ export async function loginAsRole(
 /** The seeded zone (Baneh). Tests that need "outside coverage" use a coordinate far away. */
 export const ZONE_ID = BANEH_ZONE.id;
 
+let helperPhoneSeq = 0;
+
+/** Fresh unique phone per call: keeps per-user caps (2 open orders) out of the way. */
+export const freshPhone = (): string =>
+  `0912${String(9_000_000 + helperPhoneSeq++).padStart(7, '0')}`;
+
+export interface TradeSetup {
+  owner: { token: string; userId: string; phone: string };
+  taker: { token: string; userId: string; phone: string };
+  orderId: string;
+  reservationId: string;
+  /** Thread as seen by the taker right after the reservation request. */
+  conversationId: string;
+}
+
+/**
+ * Drives one trade to the state a chat/notification test needs: order → reservation →
+ * (optional) owner acceptance. Every persona is a brand new user.
+ */
+export async function startTrade(
+  ctx: TestContext,
+  options: { confirm?: boolean; payload?: Record<string, unknown> } = {},
+): Promise<TradeSetup> {
+  const ownerPhone = freshPhone();
+  const takerPhone = freshPhone();
+  const owner = { ...(await login(ctx, ownerPhone)), phone: ownerPhone };
+  const taker = { ...(await login(ctx, takerPhone)), phone: takerPhone };
+
+  const order = await ctx.app.inject({
+    method: 'POST',
+    url: '/v1/orders',
+    headers: auth(owner.token),
+    payload: orderPayload(options.payload),
+  });
+  if (order.statusCode !== 201) throw new Error(`order creation failed: ${order.body}`);
+  const orderId = (order.json() as { id: string }).id;
+
+  const reservation = await ctx.app.inject({
+    method: 'POST',
+    url: `/v1/orders/${orderId}/reservations`,
+    headers: auth(taker.token),
+  });
+  if (reservation.statusCode !== 201) throw new Error(`reservation failed: ${reservation.body}`);
+  const reservationId = (reservation.json() as { id: string }).id;
+
+  if (options.confirm !== false) {
+    const confirmed = await ctx.app.inject({
+      method: 'POST',
+      url: `/v1/reservations/${reservationId}/confirm`,
+      headers: auth(owner.token),
+    });
+    if (confirmed.statusCode !== 200) throw new Error(`confirm failed: ${confirmed.body}`);
+  }
+
+  const conversation = await ctx.app.inject({
+    method: 'GET',
+    url: `/v1/orders/${orderId}/conversation`,
+    headers: auth(owner.token),
+  });
+  if (conversation.statusCode !== 200) throw new Error(`chat open failed: ${conversation.body}`);
+  const conversationId = (conversation.json() as { id: string }).id;
+
+  return { owner, taker, orderId, reservationId, conversationId };
+}
+
 export const orderPayload = (overrides: Record<string, unknown> = {}) => ({
   side: 'SELL',
   tier: 'T3000',
