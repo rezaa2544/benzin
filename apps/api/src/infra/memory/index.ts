@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type {
   AuditEntry,
+  DeviceRecord,
   Order,
+  RefreshTokenRecord,
   Reservation,
   SettingsRecord,
   User,
@@ -14,11 +16,13 @@ import type {
   OrderRepository,
   OrderSearchQuery,
   OtpChallenge,
+  DeviceInput,
+  DeviceRepository,
+  NewRefreshToken,
   OtpRepository,
+  RefreshTokenRepository,
   Repositories,
   ReservationRepository,
-  Session,
-  SessionRepository,
   SettingsRepository,
   SmsSender,
   UserRepository,
@@ -86,28 +90,98 @@ export class MemoryOtpRepository implements OtpRepository {
   }
 }
 
-export class MemorySessionRepository implements SessionRepository {
-  private readonly byToken = new Map<string, Session>();
+export class MemoryRefreshTokenRepository implements RefreshTokenRepository {
+  private readonly byId = new Map<string, RefreshTokenRecord>();
 
-  async create(userId: string, expiresAt: Date): Promise<Session> {
-    const session: Session = {
-      token: randomUUID().replace(/-/g, '') + randomUUID().replace(/-/g, ''),
-      userId,
-      expiresAt,
+  async create(input: NewRefreshToken): Promise<RefreshTokenRecord> {
+    const record: RefreshTokenRecord = {
+      id: randomUUID(),
+      userId: input.userId,
+      tokenHash: input.tokenHash,
+      familyId: input.familyId,
+      deviceId: input.deviceId,
+      expiresAt: input.expiresAt,
       revokedAt: null,
+      replacedBy: null,
+      createdAt: new Date(),
     };
-    this.byToken.set(session.token, session);
-    return clone(session);
+    this.byId.set(record.id, clone(record));
+    return clone(record);
   }
 
-  async find(token: string): Promise<Session | null> {
-    const session = this.byToken.get(token);
-    return session ? clone(session) : null;
+  async findByHash(tokenHash: string): Promise<RefreshTokenRecord | null> {
+    for (const record of this.byId.values()) {
+      if (record.tokenHash === tokenHash) return clone(record);
+    }
+    return null;
   }
 
-  async revoke(token: string): Promise<void> {
-    const session = this.byToken.get(token);
-    if (session) this.byToken.set(token, { ...session, revokedAt: new Date() });
+  async revoke(id: string, replacedBy: string | null, at: Date): Promise<void> {
+    const record = this.byId.get(id);
+    if (record) this.byId.set(id, { ...record, revokedAt: at, replacedBy });
+  }
+
+  async revokeFamily(familyId: string, at: Date): Promise<number> {
+    let revoked = 0;
+    for (const [id, record] of this.byId) {
+      if (record.familyId === familyId && record.revokedAt === null) {
+        this.byId.set(id, { ...record, revokedAt: at });
+        revoked += 1;
+      }
+    }
+    return revoked;
+  }
+
+  async revokeAllForUser(userId: string, at: Date): Promise<number> {
+    let revoked = 0;
+    for (const [id, record] of this.byId) {
+      if (record.userId === userId && record.revokedAt === null) {
+        this.byId.set(id, { ...record, revokedAt: at });
+        revoked += 1;
+      }
+    }
+    return revoked;
+  }
+
+  async countActive(userId: string): Promise<number> {
+    return [...this.byId.values()].filter((r) => r.userId === userId && r.revokedAt === null)
+      .length;
+  }
+}
+
+export class MemoryDeviceRepository implements DeviceRepository {
+  private readonly byId = new Map<string, DeviceRecord>();
+
+  async upsert(input: DeviceInput, at: Date): Promise<DeviceRecord> {
+    for (const [id, device] of this.byId) {
+      if (device.userId === input.userId && device.deviceId === input.deviceId) {
+        const updated: DeviceRecord = {
+          ...device,
+          platform: input.platform,
+          pushToken: input.pushToken ?? device.pushToken,
+          appVersion: input.appVersion ?? device.appVersion,
+          lastSeenAt: at,
+        };
+        this.byId.set(id, clone(updated));
+        return updated;
+      }
+    }
+    const created: DeviceRecord = {
+      id: randomUUID(),
+      userId: input.userId,
+      deviceId: input.deviceId,
+      platform: input.platform,
+      pushToken: input.pushToken ?? null,
+      appVersion: input.appVersion ?? null,
+      lastSeenAt: at,
+      createdAt: at,
+    };
+    this.byId.set(created.id, clone(created));
+    return created;
+  }
+
+  async listByUser(userId: string): Promise<DeviceRecord[]> {
+    return [...this.byId.values()].filter((d) => d.userId === userId).map(clone);
   }
 }
 
@@ -334,7 +408,8 @@ export function createMemoryRepositories(): Repositories {
   return {
     users: new MemoryUserRepository(),
     otps: new MemoryOtpRepository(),
-    sessions: new MemorySessionRepository(),
+    refreshTokens: new MemoryRefreshTokenRepository(),
+    devices: new MemoryDeviceRepository(),
     orders: new MemoryOrderRepository(),
     reservations: new MemoryReservationRepository(),
     settings: new MemorySettingsRepository(),

@@ -49,6 +49,30 @@ export interface Reservation {
   cancelReason: string | null;
 }
 
+export interface DeviceRecord {
+  readonly id: string;
+  readonly userId: string;
+  readonly deviceId: string;
+  platform: 'android' | 'ios' | 'web';
+  pushToken: string | null;
+  appVersion: string | null;
+  lastSeenAt: Date;
+  readonly createdAt: Date;
+}
+
+/** One row per issued refresh token; rotation links the chain through `familyId`. */
+export interface RefreshTokenRecord {
+  readonly id: string;
+  readonly userId: string;
+  readonly tokenHash: string;
+  readonly familyId: string;
+  readonly deviceId: string | null;
+  readonly expiresAt: Date;
+  revokedAt: Date | null;
+  replacedBy: string | null;
+  readonly createdAt: Date;
+}
+
 export interface SettingsRecord {
   key: string;
   value: unknown;
