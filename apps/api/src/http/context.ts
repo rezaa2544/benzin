@@ -17,7 +17,6 @@ export interface AppServices {
 declare module 'fastify' {
   interface FastifyRequest {
     currentUser?: User;
-    sessionToken?: string;
   }
 }
 
@@ -38,9 +37,7 @@ export function authenticate(auth: AuthService) {
     const header = request.headers.authorization;
     if (!header?.startsWith('Bearer ')) throw AppError.unauthorized();
     const token = header.slice('Bearer '.length).trim();
-    const user = await auth.authenticate(token);
-    request.currentUser = user;
-    request.sessionToken = token;
+    request.currentUser = await auth.authenticate(token);
   };
 }
 

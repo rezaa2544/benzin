@@ -3,6 +3,7 @@ import {
   auth,
   createTestContext,
   login,
+  mintAccessToken,
   orderPayload,
   ZONE_ID,
   type TestContext,
@@ -163,12 +164,10 @@ describe('orders', () => {
     });
     expect(stranger.statusCode).toBe(403);
 
-    const ownerToken = (
-      await ctx.repos.sessions.create(
-        (await ctx.repos.orders.findById(order.id))!.ownerId,
-        new Date(Date.now() + 60_000),
-      )
-    ).token;
+    const owner = (await ctx.repos.users.findById(
+      (await ctx.repos.orders.findById(order.id))!.ownerId,
+    ))!;
+    const ownerToken = mintAccessToken(owner);
     const cancelled = await ctx.app.inject({
       method: 'POST',
       url: `/v1/orders/${order.id}/cancel`,

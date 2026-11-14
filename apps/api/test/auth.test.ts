@@ -28,10 +28,16 @@ describe('authentication', () => {
       payload: { phone, code: ctx.sms.lastCodeFor(phone) },
     });
     expect(verified.statusCode).toBe(200);
-    const body = verified.json() as { token: string; isNewUser: boolean; user: { phone: string } };
+    const body = verified.json() as {
+      accessToken: string;
+      refreshToken: string;
+      isNewUser: boolean;
+      user: { phone: string };
+    };
     expect(body.isNewUser).toBe(true);
     expect(body.user.phone).toBe(phone);
-    expect(body.token.length).toBeGreaterThan(20);
+    expect(body.accessToken.split('.')).toHaveLength(3);
+    expect(body.refreshToken.length).toBeGreaterThan(20);
   });
 
   it('rejects a wrong code and lowers the remaining attempts', async () => {
@@ -75,19 +81,27 @@ describe('authentication', () => {
     expect(response.statusCode).toBe(401);
   });
 
-  it('returns the profile and revokes the session on logout', async () => {
-    const { token } = await login(ctx, '09123333333');
-    const me = await ctx.app.inject({ method: 'GET', url: '/v1/me', headers: auth(token) });
+  it('returns the profile and revokes the refresh family on logout', async () => {
+    const { accessToken, refreshToken } = await login(ctx, '09123333333');
+    const me = await ctx.app.inject({ method: 'GET', url: '/v1/me', headers: auth(accessToken) });
     expect(me.statusCode).toBe(200);
     expect((me.json() as { phone: string }).phone).toBe('09123333333');
 
-    expect(
-      (await ctx.app.inject({ method: 'POST', url: '/v1/auth/logout', headers: auth(token) }))
-        .statusCode,
-    ).toBe(204);
-    expect(
-      (await ctx.app.inject({ method: 'GET', url: '/v1/me', headers: auth(token) })).statusCode,
-    ).toBe(401);
+    const loggedOut = await ctx.app.inject({
+      method: 'POST',
+      url: '/v1/auth/logout',
+      payload: { refreshToken },
+    });
+    expect(loggedOut.statusCode).toBe(204);
+
+    // Access tokens are short-lived by design; the refresh token dies immediately.
+    const after = await ctx.app.inject({
+      method: 'POST',
+      url: '/v1/auth/refresh',
+      payload: { refreshToken },
+    });
+    expect(after.statusCode).toBe(401);
+    expect((after.json() as { error: { code: string } }).error.code).toBe('REFRESH_TOKEN_INVALID');
   });
 
   it('rejects invalid phone numbers with field details', async () => {

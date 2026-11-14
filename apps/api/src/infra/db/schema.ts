@@ -127,9 +127,13 @@ export const refreshTokens = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     tokenHash: text('token_hash').notNull().unique(),
+    /** Rotation chain: every token descended from one login shares a family. */
+    familyId: uuid('family_id').notNull(),
     deviceId: uuid('device_id').references(() => devices.id, { onDelete: 'set null' }),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    /** Set when this token was rotated; a revoked token without it was logged out. */
+    replacedBy: uuid('replaced_by'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

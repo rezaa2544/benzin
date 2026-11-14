@@ -8,6 +8,10 @@ const envSchema = z.object({
   DATABASE_URL: z.string().url().optional(),
   REDIS_URL: z.string().url().optional(),
   OTP_PEPPER: z.string().min(8).default('dev-otp-pepper-change-me'),
+  /** HS256 key for short-lived access tokens. Must be rotated per environment. */
+  JWT_SECRET: z.string().min(16).default('dev-jwt-secret-change-me-please'),
+  ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().min(60).max(3600).default(900),
+  TOKEN_ISSUER: z.string().default('benzin'),
   SESSION_TTL_MINUTES: z.coerce
     .number()
     .int()

@@ -16,7 +16,7 @@
     "dev:web": "pnpm --filter @benzin/web dev",
     "format": "prettier --write \"**/*.{ts,tsx,json,md,yml,yaml,css}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,json,md,yml,yaml,css}\"",
-    "prepare": "husky",
+    "prepare": "husky || true",
     "commitlint": "commitlint --edit"
   },
   "devDependencies": {
@@ -31,7 +31,8 @@
     "prettier": "^3.4.2",
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.18.0",
-    "vitest": "^2.1.8"
+    "vitest": "^2.1.8",
+    "husky": "^9.1.7"
   },
   "type": "module"
 }

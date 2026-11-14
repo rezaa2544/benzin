@@ -9,6 +9,7 @@ import {
   isAppError,
   orderSearchSchema,
   paginationSchema,
+  refreshTokenSchema,
   requestOtpSchema,
   verifyOtpSchema,
   fieldErrors,
@@ -16,12 +17,12 @@ import {
 import type { Config } from '../config.js';
 import type { Clock, User } from '../domain/entities.js';
 import type { Repositories, SmsSender } from '../ports.js';
-import { assertRole } from '../modules/auth-service.js';
 import { AuthService } from '../modules/auth-service.js';
 import { OrderService } from '../modules/orders-service.js';
 import { ReservationService } from '../modules/reservations-service.js';
 import { SettingsService } from '../modules/settings-service.js';
 import { authenticate, currentUser, parseInput, type AppServices } from './context.js';
+import { requireRole } from './roles.js';
 
 export interface BuildAppOptions {
   config: Config;
@@ -46,7 +47,18 @@ const toPublicUser = (user: User) => ({
 export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   const { config, repos, sms, clock } = options;
   const settings = new SettingsService(repos);
-  const auth = new AuthService(repos, settings, sms, clock, config.OTP_PEPPER);
+  const auth = new AuthService(
+    repos,
+    settings,
+    sms,
+    clock,
+    {
+      secret: config.JWT_SECRET,
+      issuer: config.TOKEN_ISSUER,
+      accessTtlSeconds: config.ACCESS_TOKEN_TTL_SECONDS,
+    },
+    config.OTP_PEPPER,
+  );
   const orders = new OrderService(repos, settings, clock);
   const reservations = new ReservationService(repos, settings, clock);
   const services: AppServices = { auth, orders, reservations, settings };
@@ -130,18 +142,51 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
 
   app.post('/v1/auth/otp/verify', async (request) => {
     const body = parseInput(verifyOtpSchema, request.body);
-    const result = await auth.verifyOtp(body.phone, body.code);
+    const result = await auth.verifyOtp(body.phone, body.code, body.device);
     return {
-      token: result.token,
-      expiresAt: result.expiresAt.toISOString(),
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+      expiresIn: result.expiresIn,
+      deviceId: result.deviceId,
       isNewUser: result.isNewUser,
       user: toPublicUser(result.user),
     };
   });
 
-  app.post('/v1/auth/logout', { preHandler: requireAuth }, async (request, reply) => {
-    if (request.sessionToken) await auth.logout(request.sessionToken);
+  /** Rotation: the old refresh token dies, the new one inherits the same family. */
+  app.post('/v1/auth/refresh', async (request) => {
+    const body = parseInput(refreshTokenSchema, request.body);
+    const result = await auth.refresh(body.refreshToken);
+    return {
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+      expiresIn: result.expiresIn,
+      user: toPublicUser(result.user),
+    };
+  });
+
+  app.post('/v1/auth/logout', async (request, reply) => {
+    const body = parseInput(refreshTokenSchema, request.body);
+    await auth.logout(body.refreshToken);
     return reply.status(204).send();
+  });
+
+  app.post('/v1/auth/logout-all', { preHandler: requireAuth }, async (request, reply) => {
+    const revoked = await auth.logoutAll(currentUser(request));
+    return reply.status(200).send({ revoked });
+  });
+
+  app.get('/v1/me/devices', { preHandler: requireAuth }, async (request) => {
+    const devices = await auth.listDevices(currentUser(request));
+    return {
+      items: devices.map((device) => ({
+        id: device.id,
+        platform: device.platform,
+        deviceId: device.deviceId,
+        appVersion: device.appVersion,
+        lastSeenAt: device.lastSeenAt.toISOString(),
+      })),
+    };
   });
 
   app.get('/v1/me', { preHandler: requireAuth }, async (request) =>
@@ -214,24 +259,33 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   });
 
   // ------------------------------------------------------------- admin
-  app.get('/v1/admin/settings', { preHandler: requireAuth }, async (request) => {
-    assertRole(currentUser(request), ['ADMIN', 'OWNER']);
-    return { settings: await settings.get() };
-  });
+  app.get(
+    '/v1/admin/settings',
+    { preHandler: [requireAuth, requireRole('ADMIN', 'OWNER')] },
+    async () => {
+      return { settings: await settings.get() };
+    },
+  );
 
-  app.patch('/v1/admin/settings', { preHandler: requireAuth }, async (request) => {
-    const user = currentUser(request);
-    assertRole(user, ['ADMIN', 'OWNER']);
-    const patch = request.body as Record<string, unknown> | undefined;
-    if (!patch || typeof patch !== 'object') throw AppError.validation('Body must be an object');
-    return { updated: await settings.update(user.id, patch) };
-  });
+  app.patch(
+    '/v1/admin/settings',
+    { preHandler: [requireAuth, requireRole('ADMIN', 'OWNER')] },
+    async (request) => {
+      const user = currentUser(request);
+      const patch = request.body as Record<string, unknown> | undefined;
+      if (!patch || typeof patch !== 'object') throw AppError.validation('Body must be an object');
+      return { updated: await settings.update(user.id, patch) };
+    },
+  );
 
-  app.get('/v1/admin/audit', { preHandler: requireAuth }, async (request) => {
-    assertRole(currentUser(request), ['ADMIN', 'OWNER']);
-    const query = parseInput(paginationSchema, request.query);
-    return { items: await repos.audit.list(query.limit) };
-  });
+  app.get(
+    '/v1/admin/audit',
+    { preHandler: [requireAuth, requireRole('ADMIN', 'OWNER')] },
+    async (request) => {
+      const query = parseInput(paginationSchema, request.query);
+      return { items: await repos.audit.list(query.limit) };
+    },
+  );
 
   return { app, services };
 }

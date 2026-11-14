@@ -6,7 +6,15 @@ import type {
   UserRole,
   UserStatus,
 } from '@benzin/shared';
-import type { AuditEntry, Order, Reservation, SettingsRecord, User } from './domain/entities.js';
+import type {
+  AuditEntry,
+  DeviceRecord,
+  Order,
+  RefreshTokenRecord,
+  Reservation,
+  SettingsRecord,
+  User,
+} from './domain/entities.js';
 
 export interface NewUser {
   phone: string;
@@ -35,17 +43,36 @@ export interface OtpRepository {
   save(challenge: OtpChallenge): Promise<void>;
 }
 
-export interface Session {
-  token: string;
+export interface NewRefreshToken {
   userId: string;
+  tokenHash: string;
+  familyId: string;
+  deviceId: string | null;
   expiresAt: Date;
-  revokedAt: Date | null;
 }
 
-export interface SessionRepository {
-  create(userId: string, expiresAt: Date): Promise<Session>;
-  find(token: string): Promise<Session | null>;
-  revoke(token: string): Promise<void>;
+export interface RefreshTokenRepository {
+  create(input: NewRefreshToken): Promise<RefreshTokenRecord>;
+  findByHash(tokenHash: string): Promise<RefreshTokenRecord | null>;
+  /** Marks one token as rotated/revoked; `replacedBy` links the successor. */
+  revoke(id: string, replacedBy: string | null, at: Date): Promise<void>;
+  /** Revokes every token of a rotation family — the response to a reuse detection. */
+  revokeFamily(familyId: string, at: Date): Promise<number>;
+  revokeAllForUser(userId: string, at: Date): Promise<number>;
+  countActive(userId: string): Promise<number>;
+}
+
+export interface DeviceInput {
+  userId: string;
+  deviceId: string;
+  platform: 'android' | 'ios' | 'web';
+  pushToken?: string | null;
+  appVersion?: string | null;
+}
+
+export interface DeviceRepository {
+  upsert(input: DeviceInput, at: Date): Promise<DeviceRecord>;
+  listByUser(userId: string): Promise<DeviceRecord[]>;
 }
 
 export interface NewOrder {
@@ -141,7 +168,8 @@ export interface IdGenerator {
 export interface Repositories {
   users: UserRepository;
   otps: OtpRepository;
-  sessions: SessionRepository;
+  refreshTokens: RefreshTokenRepository;
+  devices: DeviceRepository;
   orders: OrderRepository;
   reservations: ReservationRepository;
   settings: SettingsRepository;

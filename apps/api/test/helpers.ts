@@ -5,6 +5,19 @@ import { createMemoryRepositories } from '../src/infra/memory/index.js';
 import { systemClock, type Clock } from '../src/domain/entities.js';
 import type { Repositories, SmsSender } from '../src/ports.js';
 import type { UserRole } from '@benzin/shared';
+import { signAccessToken } from '../src/modules/tokens.js';
+
+export const TEST_JWT_SECRET = 'test-jwt-secret-value-for-tests';
+export const TEST_ISSUER = 'benzin';
+
+export const testTokenConfig = {
+  secret: TEST_JWT_SECRET,
+  issuer: TEST_ISSUER,
+  accessTtlSeconds: 900,
+} as const;
+
+export const mintAccessToken = (user: { id: string; role: UserRole }): string =>
+  signAccessToken({ sub: user.id, role: user.role }, testTokenConfig).token;
 
 export class CapturingSms implements SmsSender {
   readonly messages: { phone: string; message: string }[] = [];
@@ -38,6 +51,8 @@ export async function createTestContext(clock: Clock = systemClock): Promise<Tes
       NODE_ENV: 'test',
       LOG_LEVEL: 'silent',
       OTP_PEPPER: 'test-pepper-value',
+      JWT_SECRET: TEST_JWT_SECRET,
+      TOKEN_ISSUER: TEST_ISSUER,
       CORS_ORIGINS: 'http://localhost:5173',
     }),
     repos,
@@ -60,8 +75,18 @@ export async function login(
     url: '/v1/auth/otp/verify',
     payload: { phone, code },
   });
-  const body = response.json() as { token: string; user: { id: string } };
-  return { token: body.token, userId: body.user.id };
+  const body = response.json() as {
+    accessToken: string;
+    refreshToken: string;
+    user: { id: string };
+  };
+  return {
+    accessToken: body.accessToken,
+    // Short alias kept so existing tests read naturally.
+    token: body.accessToken,
+    refreshToken: body.refreshToken,
+    userId: body.user.id,
+  };
 }
 
 export function auth(token: string): Record<string, string> {
@@ -75,8 +100,7 @@ export async function loginAsRole(
   role: UserRole,
 ): Promise<{ token: string; userId: string }> {
   const user = await ctx.repos.users.create({ phone, role });
-  const session = await ctx.repos.sessions.create(user.id, new Date(Date.now() + 3_600_000));
-  return { token: session.token, userId: user.id };
+  return { token: mintAccessToken(user), userId: user.id };
 }
 
 export const ZONE_ID = '6f9619ff-8b86-d011-b42d-00c04fc964ff';

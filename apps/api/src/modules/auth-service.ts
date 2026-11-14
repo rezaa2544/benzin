@@ -1,22 +1,37 @@
-import { createHash, randomInt, timingSafeEqual } from 'node:crypto';
+import { randomInt } from 'node:crypto';
 import { AppError, type UserRole } from '@benzin/shared';
-import type { User } from '../domain/entities.js';
+import type { Clock, User } from '../domain/entities.js';
 import type { Repositories, SmsSender } from '../ports.js';
-import type { Clock } from '../domain/entities.js';
 import type { SettingsService } from './settings-service.js';
+import {
+  createRefreshToken,
+  sha256,
+  signAccessToken,
+  verifyAccessToken,
+  type TokenConfig,
+} from './tokens.js';
 
-const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex');
-
-const safeEqual = (a: string, b: string): boolean => {
-  const bufA = Buffer.from(a);
-  const bufB = Buffer.from(b);
-  return bufA.length === bufB.length && timingSafeEqual(bufA, bufB);
+const safeEqualHex = (a: string, b: string): boolean => {
+  if (a.length !== b.length) return false;
+  let mismatch = 0;
+  for (let index = 0; index < a.length; index += 1)
+    mismatch |= a.charCodeAt(index) ^ b.charCodeAt(index);
+  return mismatch === 0;
 };
 
-export interface SessionResult {
-  token: string;
-  expiresAt: Date;
+export interface DeviceInput {
+  platform: 'android' | 'ios' | 'web';
+  deviceId: string;
+  pushToken?: string;
+  appVersion?: string;
+}
+
+export interface AuthSession {
+  accessToken: string;
+  refreshToken: string;
+  expiresIn: number;
   user: User;
+  deviceId: string | null;
   isNewUser: boolean;
 }
 
@@ -26,6 +41,7 @@ export class AuthService {
     private readonly settings: SettingsService,
     private readonly sms: SmsSender,
     private readonly clock: Clock,
+    private readonly tokens: TokenConfig,
     private readonly pepper: string,
   ) {}
 
@@ -52,20 +68,22 @@ export class AuthService {
       config['otp.length'],
       '0',
     );
-    const expiresAt = new Date(now.getTime() + config['otp.ttl_seconds'] * 1000);
     await this.repos.otps.save({
       phone,
       codeHash: this.hash(code, phone),
-      expiresAt,
+      expiresAt: new Date(now.getTime() + config['otp.ttl_seconds'] * 1000),
       attempts: 0,
       sentAt: now,
       consumedAt: null,
     });
     await this.sms.send(phone, `کد ورود شما به بنزین: ${code}`);
-    return { expiresAt, cooldownSeconds: config['otp.resend_cooldown_seconds'] };
+    return {
+      expiresAt: new Date(now.getTime() + config['otp.ttl_seconds'] * 1000),
+      cooldownSeconds: config['otp.resend_cooldown_seconds'],
+    };
   }
 
-  async verifyOtp(phone: string, code: string): Promise<SessionResult> {
+  async verifyOtp(phone: string, code: string, device?: DeviceInput): Promise<AuthSession> {
     const config = await this.settings.get();
     const now = this.clock.now();
     const challenge = await this.repos.otps.findLatest(phone);
@@ -79,7 +97,7 @@ export class AuthService {
     if (challenge.attempts >= config['otp.max_attempts']) {
       throw new AppError('OTP_ATTEMPTS_EXCEEDED', 429, 'Too many attempts');
     }
-    if (!safeEqual(this.hash(code, phone), challenge.codeHash)) {
+    if (!safeEqualHex(this.hash(code, phone), challenge.codeHash)) {
       await this.repos.otps.save({ ...challenge, attempts: challenge.attempts + 1 });
       throw new AppError('OTP_INVALID', 401, 'Wrong code', {
         remainingAttempts: Math.max(0, config['otp.max_attempts'] - challenge.attempts - 1),
@@ -94,36 +112,140 @@ export class AuthService {
     if (user.status !== 'ACTIVE')
       throw new AppError('ACCOUNT_SUSPENDED', 403, 'Account is not active');
 
-    const session = await this.repos.sessions.create(
-      user.id,
-      new Date(now.getTime() + config['auth.refresh_token_days'] * 24 * 60 * 60 * 1000),
-    );
+    let deviceId: string | null = null;
+    if (device) {
+      const stored = await this.repos.devices.upsert({ ...device, userId: user.id }, now);
+      deviceId = stored.id;
+    }
+
+    const session = await this.issueSession(user, deviceId, null);
     await this.repos.audit.append({
       actorId: user.id,
       action: isNewUser ? 'auth.registered' : 'auth.login',
       entity: 'user',
       entityId: user.id,
-      metadata: { phone },
+      metadata: { phone, deviceId },
     });
-
-    return { token: session.token, expiresAt: session.expiresAt, user, isNewUser };
+    return { ...session, user, isNewUser };
   }
 
-  async authenticate(token: string): Promise<User> {
-    const session = await this.repos.sessions.find(token);
-    if (!session || session.revokedAt !== null) throw AppError.unauthorized('Invalid session');
-    if (session.expiresAt.getTime() <= this.clock.now().getTime()) {
-      throw AppError.unauthorized('Session expired');
+  private async issueSession(
+    user: User,
+    deviceId: string | null,
+    familyId: string | null,
+  ): Promise<{
+    accessToken: string;
+    refreshToken: string;
+    expiresIn: number;
+    deviceId: string | null;
+    recordId: string;
+  }> {
+    const config = await this.settings.get();
+    const now = this.clock.now();
+    const access = signAccessToken({ sub: user.id, role: user.role }, this.tokens, now);
+    const refresh = createRefreshToken(config['auth.refresh_token_days'], now);
+
+    const record = await this.repos.refreshTokens.create({
+      userId: user.id,
+      tokenHash: refresh.tokenHash,
+      familyId: familyId ?? crypto.randomUUID(),
+      deviceId,
+      expiresAt: refresh.expiresAt,
+    });
+
+    return {
+      accessToken: access.token,
+      refreshToken: refresh.token,
+      expiresIn: access.expiresIn,
+      deviceId,
+      recordId: record.id,
+    };
+  }
+
+  /**
+   * Rotates a refresh token. Presenting a token that was already rotated means it leaked:
+   * the whole family is revoked so neither the attacker nor the legitimate client can continue.
+   */
+  async refresh(rawToken: string): Promise<AuthSession> {
+    const now = this.clock.now();
+    const stored = await this.repos.refreshTokens.findByHash(sha256(rawToken));
+    if (!stored) throw new AppError('REFRESH_TOKEN_INVALID', 401, 'Unknown refresh token');
+
+    if (stored.revokedAt !== null && stored.replacedBy === null) {
+      // Revoked deliberately (logout, admin action): not a security event.
+      throw new AppError('REFRESH_TOKEN_INVALID', 401, 'Refresh token revoked');
     }
-    const user = await this.repos.users.findById(session.userId);
+    if (stored.revokedAt !== null) {
+      const revoked = await this.repos.refreshTokens.revokeFamily(stored.familyId, now);
+      await this.repos.audit.append({
+        actorId: stored.userId,
+        action: 'auth.refresh_reuse_detected',
+        entity: 'user',
+        entityId: stored.userId,
+        metadata: { familyId: stored.familyId, revoked },
+      });
+      throw new AppError(
+        'REFRESH_TOKEN_REUSED',
+        401,
+        'Refresh token reuse detected; session revoked',
+      );
+    }
+    if (stored.expiresAt.getTime() <= now.getTime()) {
+      throw new AppError('REFRESH_TOKEN_INVALID', 401, 'Refresh token expired');
+    }
+
+    const user = await this.repos.users.findById(stored.userId);
+    if (!user) throw new AppError('REFRESH_TOKEN_INVALID', 401, 'Unknown user');
+    if (user.status !== 'ACTIVE')
+      throw new AppError('ACCOUNT_SUSPENDED', 403, 'Account is not active');
+
+    const next = await this.issueSession(user, stored.deviceId, stored.familyId);
+    await this.repos.refreshTokens.revoke(stored.id, next.recordId, now);
+
+    return {
+      accessToken: next.accessToken,
+      refreshToken: next.refreshToken,
+      expiresIn: next.expiresIn,
+      user,
+      deviceId: stored.deviceId,
+      isNewUser: false,
+    };
+  }
+
+  /** Revokes the family the given refresh token belongs to (logout of one device). */
+  async logout(rawToken: string): Promise<number> {
+    const stored = await this.repos.refreshTokens.findByHash(sha256(rawToken));
+    if (!stored) return 0;
+    return this.repos.refreshTokens.revokeFamily(stored.familyId, this.clock.now());
+  }
+
+  async logoutAll(user: User): Promise<number> {
+    const revoked = await this.repos.refreshTokens.revokeAllForUser(user.id, this.clock.now());
+    await this.repos.audit.append({
+      actorId: user.id,
+      action: 'auth.logout_all',
+      entity: 'user',
+      entityId: user.id,
+      metadata: { revoked },
+    });
+    return revoked;
+  }
+
+  /**
+   * Verifies a short-lived access token and re-reads the user, so a role change or a
+   * suspension takes effect immediately instead of after the token expires.
+   */
+  async authenticate(accessToken: string): Promise<User> {
+    const claims = verifyAccessToken(accessToken, this.tokens, this.clock.now());
+    const user = await this.repos.users.findById(claims.sub);
     if (!user) throw AppError.unauthorized('Unknown user');
     if (user.status !== 'ACTIVE')
       throw new AppError('ACCOUNT_SUSPENDED', 403, 'Account is not active');
     return user;
   }
 
-  async logout(token: string): Promise<void> {
-    await this.repos.sessions.revoke(token);
+  listDevices(user: User) {
+    return this.repos.devices.listByUser(user.id);
   }
 }
 
