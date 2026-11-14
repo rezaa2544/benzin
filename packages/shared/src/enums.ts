@@ -19,6 +19,27 @@ export const ORDER_STATUSES = [
 ] as const;
 export type OrderStatus = (typeof ORDER_STATUSES)[number];
 
+/**
+ * Persian copy for every order state (task E9-01). Kept next to the enum so the customer
+ * app, the admin panel and the notification templates can never drift apart.
+ */
+export const ORDER_STATUS_FA: Record<OrderStatus, string> = {
+  OPEN: 'باز',
+  RESERVED: 'رزرو شده',
+  CONFIRMED: 'تأیید شده',
+  COMPLETED: 'تکمیل شده',
+  EXPIRED: 'منقضی',
+  CANCELLED: 'لغو شده',
+  AWAITING_OWNER_DECISION: 'در انتظار تصمیم صاحب سفارش',
+  DISPUTED: 'در اختلاف',
+};
+
+/** Persian copy for order sides, used by every card and filter in the customer app. */
+export const ORDER_SIDE_FA: Record<OrderSide, string> = {
+  SELL: 'فروش سهمیه',
+  BUY: 'خرید سهمیه',
+};
+
 export const RESERVATION_STATUSES = [
   'PENDING_OWNER',
   'CONFIRMED',
