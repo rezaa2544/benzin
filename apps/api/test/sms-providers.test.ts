@@ -7,6 +7,7 @@ import {
   SmsIrTransport,
   SmsTransportError,
   createSmsSender,
+  formatOtpMessage,
   type FetchLike,
   type SmsAttempt,
 } from '../src/infra/sms/index.js';
@@ -256,6 +257,10 @@ describe('OTP request when no provider accepts the message', () => {
         sent.push(Date.now());
         throw new AppError('SMS_UNAVAILABLE', 503, 'down');
       },
+      sendCode: async () => {
+        sent.push(Date.now());
+        throw new AppError('SMS_UNAVAILABLE', 503, 'down');
+      },
     };
     const ctx = await createTestContext(undefined, { wrapSms: () => outage });
     try {
@@ -290,5 +295,178 @@ describe('OTP request when no provider accepts the message', () => {
     const sender = new ConsoleSmsSender((line) => lines.push(line));
     await sender.send('09120000000', 'کد ورود شما به بنزین: 54321');
     expect(lines[0]).toContain('54321');
+  });
+});
+
+/**
+ * Task E1-09 — a code is not free text. Providers with an approved template deliver it through
+ * their verify endpoint (cheaper, and reachable for users who blocked promotional SMS); the chain
+ * falls back to text only where a provider has no template.
+ */
+describe('OTP template channel', () => {
+  it('SMS.ir fills the approved template through POST /v1/send/verify', async () => {
+    const { fetchImpl, calls } = fakeFetch(() => ({ body: '{"status":1,"data":{"messageId":9}}' }));
+    const transport = new SmsIrTransport({
+      apiKey: 'smsir-key-123',
+      lineNumber: '30007732900000',
+      templateId: 100_042,
+      templateParameter: 'Code',
+      baseUrl: 'https://sms.example',
+      fetchImpl,
+    });
+
+    await transport.sendCode('09123456789', '54321');
+
+    const [call] = calls;
+    expect(call!.url).toBe('https://sms.example/v1/send/verify');
+    expect(call!.init.method).toBe('POST');
+    expect(call!.init.headers['x-api-key']).toBe('smsir-key-123');
+    expect(JSON.parse(call!.init.body ?? '{}')).toEqual({
+      mobile: '9123456789',
+      templateId: 100_042,
+      parameters: [{ name: 'Code', value: '54321' }],
+    });
+  });
+
+  it('SMS.ir refuses to invent a template when none is configured', async () => {
+    const transport = new SmsIrTransport({
+      apiKey: 'k'.repeat(8),
+      lineNumber: '3000',
+      fetchImpl: fakeFetch(() => ({ body: '{"status":1}' })).fetchImpl,
+    });
+    await expect(transport.sendCode('09120000000', '12345')).rejects.toThrow(/no OTP template/);
+  });
+
+  it('SMS.ir rejects a 200 response whose body says status:0', async () => {
+    const transport = new SmsIrTransport({
+      apiKey: 'k'.repeat(8),
+      lineNumber: '3000',
+      templateId: 42,
+      fetchImpl: fakeFetch(() => ({ body: '{"status":0,"message":"template not found"}' }))
+        .fetchImpl,
+    });
+    await expect(transport.sendCode('09120000000', '12345')).rejects.toThrow(
+      /rejected by provider/,
+    );
+  });
+
+  it('Kavenegar sends the code through verify/lookup with token and template', async () => {
+    const { fetchImpl, calls } = fakeFetch(() => ({ body: '{"return":{"status":200}}' }));
+    const transport = new KavenegarTransport({
+      apiKey: 'kavenegar-key-1',
+      sender: '10004346',
+      template: 'benzin-otp',
+      baseUrl: 'https://kave.example',
+      fetchImpl,
+    });
+
+    await transport.sendCode('09123456789', '54321');
+
+    const url = new URL(calls[0]!.url);
+    expect(url.pathname).toBe('/v1/kavenegar-key-1/verify/lookup.json');
+    expect(url.searchParams.get('receptor')).toBe('09123456789');
+    expect(url.searchParams.get('token')).toBe('54321');
+    expect(url.searchParams.get('template')).toBe('benzin-otp');
+    // The free-text message field must not leak into a token lookup.
+    expect(url.searchParams.get('message')).toBeNull();
+  });
+
+  it('Kavenegar without a template refuses the code path', async () => {
+    const transport = new KavenegarTransport({
+      apiKey: 'kavenegar-key-1',
+      sender: '10004346',
+      fetchImpl: fakeFetch(() => ({ body: '{"return":{"status":200}}' })).fetchImpl,
+    });
+    await expect(transport.sendCode('09120000000', '12345')).rejects.toThrow(/no OTP template/);
+  });
+
+  it('mixes modes across the chain: template where configured, free text where not', async () => {
+    const attempts: SmsAttempt[] = [];
+    const sent: string[] = [];
+    const sender = new FailoverSmsSender(
+      [
+        {
+          name: 'smsir',
+          send: async () => {},
+          sendCode: async () => {
+            throw new SmsTransportError('smsir', 500, 'template disabled');
+          },
+        },
+        {
+          name: 'kavenegar',
+          send: async (_phone, message) => {
+            sent.push(message);
+          },
+        },
+      ],
+      (attempt) => attempts.push(attempt),
+      'کد ورود شما به بنزین: {code}',
+    );
+
+    await sender.sendCode('09120000000', '54321');
+
+    expect(sent).toEqual(['کد ورود شما به بنزین: 54321']);
+    expect(attempts.map((a) => [a.provider, a.ok, a.mode])).toEqual([
+      ['smsir', false, 'template'],
+      ['kavenegar', true, 'text'],
+    ]);
+  });
+
+  it('raises SMS_UNAVAILABLE with the modes attached when no provider takes the code', async () => {
+    const sender = new FailoverSmsSender([
+      { name: 'smsir', send: async () => {}, sendCode: async () => Promise.reject(new Error('x')) },
+      { name: 'kavenegar', send: async () => Promise.reject(new Error('y')) },
+    ]);
+
+    const error = await sender.sendCode('09120000000', '1').catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(AppError);
+    expect((error as AppError).details).toMatchObject({
+      phone: '09120000000',
+      attempts: [
+        { provider: 'smsir', mode: 'template', ok: false },
+        { provider: 'kavenegar', mode: 'text', ok: false },
+      ],
+    });
+  });
+
+  it('fills the {code} placeholder once, even when the placeholder repeats', () => {
+    expect(formatOtpMessage('کد {code} است: {code}', '4321')).toBe('کد 4321 است: 4321');
+  });
+
+  it('refuses to boot with an OTP text that has no code placeholder', async () => {
+    expect(() =>
+      createSmsSender(loadConfig({ NODE_ENV: 'test', SMS_OTP_MESSAGE: 'کد شما آماده است' })),
+    ).toThrow(/\{code\}/);
+  });
+
+  it('logs which channel delivered the code', async () => {
+    const lines: string[] = [];
+    const sender = createSmsSender(loadConfig({ NODE_ENV: 'test' }), {
+      log: (line) => lines.push(line),
+    });
+    await sender.sendCode('09120000000', '54321');
+    expect(lines.some((line) => line.includes('[sms] delivered via console (text)'))).toBe(true);
+  });
+});
+
+describe('OTP request through the code path', () => {
+  it('hands the generated code to sendCode instead of formatting a message in the service', async () => {
+    const ctx = await createTestContext();
+    try {
+      const phone = freshPhone();
+      const response = await ctx.app.inject({
+        method: 'POST',
+        url: '/v1/auth/otp/request',
+        payload: { phone },
+      });
+      expect(response.statusCode).toBe(202);
+      expect(ctx.sms.codes).toHaveLength(1);
+      expect(ctx.sms.codes[0]!.phone).toBe(phone);
+      expect(ctx.sms.codes[0]!.code).toMatch(/^\d{5}$/);
+      // The transcript still shows a readable message, so existing support tooling keeps working.
+      expect(ctx.sms.messages.at(-1)?.message).toContain(ctx.sms.codes[0]!.code);
+    } finally {
+      await ctx.close();
+    }
   });
 });

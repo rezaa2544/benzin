@@ -89,7 +89,9 @@ export class AuthService {
     };
     await this.repos.otps.save(challenge);
     try {
-      await this.sms.send(phone, `کد ورود شما به بنزین: ${code}`);
+      // A code is not just another message: the port lets a provider deliver it through an
+      // approved OTP template instead of free text (A36).
+      await this.sms.sendCode(phone, code);
     } catch (error) {
       // Nothing reached the user, so the code must not sit there burning the resend cooldown:
       // marking it consumed retires it and lets the next request issue a fresh one immediately.

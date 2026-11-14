@@ -45,10 +45,20 @@ const envSchema = z.object({
   SMS_API_KEY: z.string().min(8).optional(),
   SMS_SENDER_LINE: z.string().min(3).optional(),
   SMS_IR_BASE_URL: z.string().url().default('https://api.sms.ir'),
+  /**
+   * Approved OTP template on SMS.ir (`POST /v1/send/verify`). When unset, codes leave as free text;
+   * a template is cheaper and reaches numbers that blocked promotional SMS (A36 / task E1-09).
+   */
+  SMS_IR_TEMPLATE_ID: z.coerce.number().int().positive().optional(),
+  SMS_IR_TEMPLATE_PARAMETER: z.string().min(1).default('code'),
   /** Kavenegar (failover in D3). */
   KAVENEGAR_API_KEY: z.string().min(8).optional(),
   KAVENEGAR_SENDER_LINE: z.string().min(3).optional(),
   KAVENEGAR_BASE_URL: z.string().url().default('https://api.kavenegar.com'),
+  /** Kavenegar template name used by `verify/lookup`; unset means codes travel as free text. */
+  KAVENEGAR_TEMPLATE: z.string().min(1).optional(),
+  /** Free-text OTP body, used by providers without a template; `{code}` is mandatory. */
+  SMS_OTP_MESSAGE: z.string().min(5).default('کد ورود شما به بنزین: {code}'),
   SMS_TIMEOUT_MS: z.coerce.number().int().min(500).max(30_000).default(5_000),
   /** `sandbox` approves payments locally; `zarinpal` calls the real bank gateway. */
   PAYMENT_GATEWAY: z.enum(['sandbox', 'zarinpal']).default('sandbox'),

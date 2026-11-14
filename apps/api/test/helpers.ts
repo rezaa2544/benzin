@@ -40,9 +40,17 @@ export class ManualClock implements Clock {
 
 export class CapturingSms implements SmsSender {
   readonly messages: { phone: string; message: string }[] = [];
+  /** Codes that travelled on the dedicated code path instead of a free-form message. */
+  readonly codes: { phone: string; code: string }[] = [];
 
   async send(phone: string, message: string): Promise<void> {
     this.messages.push({ phone, message });
+  }
+
+  async sendCode(phone: string, code: string): Promise<void> {
+    this.codes.push({ phone, code });
+    // OTP assertions elsewhere only ever needed "the user got a code": keep the transcript complete.
+    this.messages.push({ phone, message: `کد ورود شما به بنزین: ${code}` });
   }
 
   lastCodeFor(phone: string): string {
