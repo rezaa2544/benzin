@@ -1,0 +1,28 @@
+/*
+ * Vazirmatn is self-hosted (BRIEF §۶: no external CDN). Only the three weights the design
+ * system uses are bundled — 400 for body, 500 for labels and 700 for headings and money —
+ * so the whole font payload stays near 150 KB instead of shipping the package full set.
+ */
+@font-face {
+  font-family: Vazirmatn;
+  src: url('../../node_modules/vazirmatn/fonts/webfonts/Vazirmatn-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: Vazirmatn;
+  src: url('../../node_modules/vazirmatn/fonts/webfonts/Vazirmatn-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: Vazirmatn;
+  src: url('../../node_modules/vazirmatn/fonts/webfonts/Vazirmatn-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}

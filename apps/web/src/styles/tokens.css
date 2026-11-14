@@ -1,0 +1,117 @@
+/*
+ * Design tokens (task E9-01). Every colour is an `R G B` triple so Tailwind can apply
+ * opacity (`bg-brand/20`), and both themes declare the same token names — the test suite
+ * asserts that parity. Colours are tuned for a phone held at arm's length in daylight:
+ * ink on bg stays above 12:1, muted above 4.5:1, and brand-ink on brand above 4.5:1.
+ */
+
+:root {
+  /* Surfaces */
+  --bg: 246 247 245;
+  --surface: 255 255 255;
+  --surface-2: 239 242 238;
+
+  /* Text */
+  --ink: 20 26 22;
+  --muted: 92 104 96;
+
+  /* Lines */
+  --line: 221 226 220;
+
+  /* Brand: fuel green */
+  --brand: 10 110 68;
+  --brand-ink: 255 255 255;
+  --brand-soft: 223 241 231;
+
+  /* Accent: petrol amber */
+  --accent: 180 83 9;
+  --accent-soft: 253 240 216;
+
+  /* Semantic */
+  --success: 21 128 61;
+  --warning: 180 83 9;
+  --danger: 185 28 28;
+  --danger-soft: 254 226 226;
+  --info: 29 78 216;
+
+  /* Reputation tiers */
+  --gold: 161 98 7;
+  --silver: 87 96 106;
+  --bronze: 146 84 45;
+
+  /* Shape */
+  --radius-xs: 0.5rem;
+  --radius-sm: 0.75rem;
+  --radius-card: 1rem;
+  --radius-sheet: 1.5rem;
+  --radius-pill: 999px;
+
+  /* Spacing (4px base) */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+
+  /* Typography */
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.375rem;
+  --text-2xl: 1.75rem;
+  --text-3xl: 2.25rem;
+
+  /* Depth */
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.06), 0 8px 24px -12px rgb(0 0 0 / 0.18);
+  --shadow-sheet: 0 -12px 40px -16px rgb(0 0 0 / 0.35);
+
+  /* Motion */
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* Layout */
+  --tap-min: 44px;
+  --phone-max: 430px;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --nav-height: 4rem;
+
+  /* Layer order */
+  --z-nav: 30;
+  --z-sheet: 50;
+  --z-toast: 60;
+}
+
+[data-theme='dark'] {
+  --bg: 12 16 14;
+  --surface: 21 27 23;
+  --surface-2: 31 39 34;
+
+  --ink: 237 242 238;
+  --muted: 158 170 162;
+
+  --line: 48 58 52;
+
+  --brand: 45 201 128;
+  --brand-ink: 6 22 14;
+  --brand-soft: 21 58 40;
+
+  --accent: 251 191 36;
+  --accent-soft: 58 44 15;
+
+  --success: 52 199 123;
+  --warning: 251 191 36;
+  --danger: 248 113 113;
+  --danger-soft: 60 24 24;
+  --info: 96 165 250;
+
+  --gold: 250 204 21;
+  --silver: 203 213 225;
+  --bronze: 217 153 106;
+
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4), 0 12px 28px -16px rgb(0 0 0 / 0.7);
+  --shadow-sheet: 0 -12px 40px -16px rgb(0 0 0 / 0.8);
+}

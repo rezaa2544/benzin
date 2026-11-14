@@ -16,7 +16,7 @@
 | `apps/api`                    | ✅ API (Fastify): OTP، JWT + refresh چرخشی، سفارش، رزرو، چت (HTTP + WebSocket)، اعلان، اعتبار و تعلیق، امتیازدهی، پلن/اشتراک، پرداخت کارت‌به‌کارت و درگاه، اختلاف، مناطق، آمار بازار، تنظیمات ادمین، لاگ ممیزی، ۱۶ مسیر مدیریتی — ۱۷۶ تست |
 | `infra/`                      | ✅ مهاجرت‌های تولیدی + seed + Docker Compose/Caddy/Dockerfile — [docs/DB.md](docs/DB.md)                                                                                                                                                  |
 | `apps/admin`                  | ✅ پنل مدیریت React/Vite (RTL، ۱۰ صفحه، ۲۹ کلید تنظیمات، لاگ ممیزی) — ۲۰ تست، [docs/ADMIN.md](docs/ADMIN.md)                                                                                                                              |
-| `apps/web`                    | ⏳ در انتظار E9-01/E9-02 (توکن‌ها و Style Guide با تأیید اسکرین‌شات)                                                                                                                                                                      |
+| `apps/web`                    | 🎨 توکن‌ها، تم روشن/تیره و ۱۲ کامپوننت پایه + راهنمای سبک زنده — ۲۵ تست، [docs/DESIGN.md](docs/DESIGN.md) · در انتظار تأیید اسکرین‌شات (E9-02)                                                                                            |
 | آداپتور Postgres              | ⏳ مناطق روی PostGIS پیاده شد؛ بقیه‌ی مخزن‌ها هنوز درون‌حافظه‌ای (E2-02…)                                                                                                                                                                 |
 
 ## شروع سریع
@@ -33,6 +33,9 @@ pnpm dev:api
 
 # پنل مدیریت روی http://localhost:5174 (پراکسی /v1 → 3000)
 pnpm dev:admin
+
+# اپ مشتری روی http://localhost:5173 (راهنمای سبک تا تأیید طراحی)
+pnpm dev:web
 ```
 
 ```bash
@@ -50,7 +53,7 @@ cd infra && docker compose up -d
 
 ```
 apps/api        NestJS-style modular monolith on Fastify (domain → services → HTTP)
-apps/web        React 18 + Vite + Tailwind + shadcn/ui — PWA (iOS) + Capacitor (Android)
+apps/web        React 18 + Vite + Tailwind، توکن و کامپوننت اختصاصی — بعداً PWA (iOS) + Capacitor (Android)
 apps/admin      پنل مدیریت، SPA جدا با همان Design System
 packages/shared enums, zod schemas, settings, state machines, Persian formatters
 infra           migrations, docker compose, Caddy, Dockerfile

@@ -1,0 +1,87 @@
+@import './tokens.css';
+@import './fonts.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-family: Vazirmatn, IRANSans, system-ui, 'Segoe UI', Tahoma, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-bg text-ink antialiased;
+    margin: 0;
+    padding-bottom: var(--safe-bottom);
+  }
+
+  /* Persian numerals stay readable; amounts align in columns. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Phone-width column, centred, used by the shell and the style guide. */
+  .phone-frame {
+    margin-inline: auto;
+    max-width: var(--phone-max);
+    padding-inline: var(--space-4);
+  }
+
+  :focus-visible {
+    outline: 2px solid rgb(var(--brand));
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 1ms !important;
+      transition-duration: 1ms !important;
+    }
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-card border border-line bg-surface p-4 shadow-card;
+  }
+
+  .btn {
+    @apply inline-flex min-h-tap items-center justify-center gap-2 rounded-sm border border-line bg-surface px-4 text-sm font-medium text-ink transition duration-fast hover:bg-surface2 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply border-transparent bg-brand text-brandInk hover:opacity-90;
+  }
+
+  .btn-danger {
+    @apply border-transparent bg-danger text-white hover:opacity-90;
+  }
+
+  .btn-ghost {
+    @apply border-transparent bg-transparent hover:bg-surface2;
+  }
+
+  .input {
+    @apply min-h-tap w-full rounded-sm border border-line bg-surface px-3 text-base text-ink outline-none placeholder:text-muted focus:border-brand focus:ring-2 focus:ring-brand/25;
+  }
+
+  .label {
+    @apply mb-1 block text-sm font-medium text-ink;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-pill bg-surface2 px-3 py-1 text-xs font-medium text-muted;
+  }
+
+  .money {
+    @apply font-bold tnum;
+  }
+
+  .divider {
+    @apply my-4 border-t border-line;
+  }
+}
