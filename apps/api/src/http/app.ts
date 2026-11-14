@@ -8,6 +8,7 @@ import {
   createOrderSchema,
   isAppError,
   orderSearchSchema,
+  originQuerySchema,
   paginationSchema,
   refreshTokenSchema,
   requestOtpSchema,
@@ -17,8 +18,10 @@ import {
 } from '@benzin/shared';
 import type { Config } from '../config.js';
 import type { Clock, User } from '../domain/entities.js';
-import type { Repositories, SmsSender } from '../ports.js';
+import type { Repositories, RouteProvider, SmsSender } from '../ports.js';
 import { AuthService } from '../modules/auth-service.js';
+import { DistanceService } from '../modules/distance-service.js';
+import { LocationService, toZoneView } from '../modules/location-service.js';
 import { OrderService } from '../modules/orders-service.js';
 import { ReservationService } from '../modules/reservations-service.js';
 import { SettingsService } from '../modules/settings-service.js';
@@ -30,6 +33,8 @@ export interface BuildAppOptions {
   repos: Repositories;
   sms: SmsSender;
   clock: Clock;
+  /** Optional real router (OSRM/Mapbox). Absent or failing → straight-line fallback. */
+  routeProvider?: RouteProvider | null;
 }
 
 export interface BuiltApp {
@@ -46,7 +51,7 @@ const toPublicUser = (user: User) => ({
 });
 
 export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
-  const { config, repos, sms, clock } = options;
+  const { config, repos, sms, clock, routeProvider = null } = options;
   const settings = new SettingsService(repos);
   const auth = new AuthService(
     repos,
@@ -60,7 +65,9 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
     },
     config.OTP_PEPPER,
   );
-  const orders = new OrderService(repos, settings, clock);
+  const locations = new LocationService(repos.zones);
+  const distance = new DistanceService(routeProvider);
+  const orders = new OrderService(repos, settings, clock, distance, locations);
   const reservations = new ReservationService(repos, settings, clock);
   const services: AppServices = { auth, orders, reservations, settings };
   const requireAuth = authenticate(auth);
@@ -197,33 +204,12 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   // --------------------------------------------------------------- zones
   app.get('/v1/zones', { preHandler: requireAuth }, async () => {
     const zones = await repos.zones.listActive();
-    return {
-      items: zones.map((zone) => ({
-        id: zone.id,
-        slug: zone.slug,
-        nameFa: zone.nameFa,
-        city: zone.city,
-        province: zone.province,
-      })),
-    };
+    return { items: zones.map(toZoneView) };
   });
 
-  /** "Which city is this point in?" — answered by the GiST index on zones.boundary. */
   app.get('/v1/zones/locate', { preHandler: requireAuth }, async (request) => {
     const query = parseInput(zoneLocateSchema, request.query);
-    const zone = await repos.zones.findByPoint({ lat: query.lat, lng: query.lng });
-    return {
-      supported: zone !== null,
-      zone: zone
-        ? {
-            id: zone.id,
-            slug: zone.slug,
-            nameFa: zone.nameFa,
-            city: zone.city,
-            province: zone.province,
-          }
-        : null,
-    };
+    return locations.locate({ lat: query.lat, lng: query.lng });
   });
 
   // -------------------------------------------------------------- orders
@@ -245,7 +231,13 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
 
   app.get('/v1/orders/:id', { preHandler: requireAuth }, async (request) => {
     const { id } = request.params as { id: string };
-    return orders.getById(id);
+    const origin = parseInput(originQuerySchema, request.query);
+    return orders.getById(
+      id,
+      origin.lat !== undefined && origin.lng !== undefined
+        ? { lat: origin.lat, lng: origin.lng }
+        : null,
+    );
   });
 
   app.post('/v1/orders/:id/cancel', { preHandler: requireAuth }, async (request) => {

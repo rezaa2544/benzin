@@ -63,11 +63,13 @@ describe('zones (E2-01)', () => {
   });
 
   it('refuses an order in a zone that is not served', async () => {
+    const payload = orderPayload({ zoneId: '0b9c1c3e-5f7a-4d2b-9e8f-1234567890ab' });
+    delete (payload as { location?: unknown }).location;
     const response = await ctx.app.inject({
       method: 'POST',
       url: '/v1/orders',
       headers: auth(token),
-      payload: orderPayload({ zoneId: '0b9c1c3e-5f7a-4d2b-9e8f-1234567890ab' }),
+      payload,
     });
     expect(response.statusCode).toBe(422);
     expect((response.json() as { error: { code: string } }).error.code).toBe('ZONE_NOT_SUPPORTED');

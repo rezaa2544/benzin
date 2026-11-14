@@ -56,3 +56,65 @@ export function ringToWktCoordinates(ring: readonly LngLat[]): string {
 export function ringToWktPolygon(ring: readonly LngLat[]): string {
   return `POLYGON((${ringToWktCoordinates(ring)}))`;
 }
+
+/**
+ * Privacy grid used for every coordinate that leaves the API (task E2-02).
+ * Two decimals ≈ 1.1 km at Iranian latitudes: enough to say "around this
+ * neighbourhood", not enough to identify a household.
+ */
+export const PRIVACY_GRID_DECIMALS = 2;
+
+/** Approximate ground size of one grid cell, in metres, for a given precision. */
+export function precisionMetersForDecimals(decimals = PRIVACY_GRID_DECIMALS): number {
+  return Math.round(111_320 / 10 ** decimals);
+}
+
+/**
+ * Snaps a point to the nearest privacy-grid centre. The result is deterministic,
+ * so repeated reads of the same order always show the same approximate spot.
+ */
+export function snapToGrid(
+  point: { lat: number; lng: number },
+  decimals = PRIVACY_GRID_DECIMALS,
+): { lat: number; lng: number } {
+  const factor = 10 ** decimals;
+  const snap = (value: number) => Math.round(value * factor) / factor;
+  return { lat: snap(point.lat), lng: snap(point.lng) };
+}
+
+/** Great-circle distance in metres. */
+export function haversineMeters(
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number },
+): number {
+  const R = 6_371_000;
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return Math.round(2 * R * Math.asin(Math.min(1, Math.sqrt(h))));
+}
+
+export interface PublicLocation {
+  lat: number;
+  lng: number;
+  /** Always true: the API never exposes the exact point (task E2-02). */
+  approximate: true;
+  precisionMeters: number;
+}
+
+/** The only sanctioned way to put coordinates into a response. */
+export function publicLocation(
+  point: { lat: number; lng: number } | null | undefined,
+): PublicLocation | null {
+  if (!point) return null;
+  const snapped = snapToGrid(point, PRIVACY_GRID_DECIMALS);
+  return {
+    lat: snapped.lat,
+    lng: snapped.lng,
+    approximate: true,
+    precisionMeters: precisionMetersForDecimals(PRIVACY_GRID_DECIMALS),
+  };
+}
