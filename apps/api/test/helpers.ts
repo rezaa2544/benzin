@@ -4,7 +4,7 @@ import { buildApp } from '../src/http/app.js';
 import { loadConfig } from '../src/config.js';
 import { createMemoryRepositories } from '../src/infra/memory/index.js';
 import { systemClock, type Clock } from '../src/domain/entities.js';
-import { BANEH_ZONE } from '../src/infra/db/seed.js';
+import { applySeed, BANEH_ZONE } from '../src/infra/db/seed.js';
 import type { Repositories, RouteProvider, SmsSender } from '../src/ports.js';
 import type { UserRole } from '@benzin/shared';
 import { signAccessToken } from '../src/modules/tokens.js';
@@ -89,8 +89,8 @@ export async function createTestContext(
     routeProvider: options.routeProvider ?? null,
   });
   const app = built.app;
-  // Every test context starts in the seeded coverage area (task E1-02).
-  await repos.zones.upsert(BANEH_ZONE);
+  // Every test context starts from the same seed as development (zones, plans, settings).
+  await applySeed(repos);
   await app.ready();
   return { app, services: built.services, repos, sms, clock, close: () => app.close() };
 }

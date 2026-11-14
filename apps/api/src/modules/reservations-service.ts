@@ -42,7 +42,10 @@ export const toReservationView = (reservation: Reservation): ReservationView => 
 
 export class ReservationService {
   constructor(
-    private readonly repos: Pick<Repositories, 'orders' | 'reservations' | 'audit' | 'users'>,
+    private readonly repos: Pick<
+      Repositories,
+      'orders' | 'reservations' | 'audit' | 'users' | 'subscriptions'
+    >,
     private readonly settings: SettingsService,
     private readonly clock: Clock,
     private readonly notifier: NotificationEmitter = NOOP_NOTIFIER,
@@ -81,6 +84,13 @@ export class ReservationService {
     }
     if (order.status !== 'OPEN' || order.expiresAt.getTime() <= now.getTime()) {
       throw new AppError('ORDER_NOT_AVAILABLE', 409, 'Order is no longer available');
+    }
+
+    if (config['subscription.required_for_orders']) {
+      const subscription = await this.repos.subscriptions.findActiveByUser(taker.id, now);
+      if (!subscription) {
+        throw new AppError('SUBSCRIPTION_REQUIRED', 403, 'An active subscription is required');
+      }
     }
 
     const active = await this.repos.reservations.findActiveByTaker(taker.id);

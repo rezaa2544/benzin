@@ -24,6 +24,9 @@ const REQUIRED_PARAMS: Record<string, Record<string, number | string>> = {
   RATING_RECEIVED: { stars: 5, score: 55 },
   ACCOUNT_SUSPENDED: { score: 10, hours: 24 },
   ACCOUNT_RESTORED: { score: 30 },
+  PAYMENT_APPROVED: { amount: 49_000, plan: 'اشتراک یک‌ماهه', endsAt: '۱۴۰۴ آبان ۲۲' },
+  PAYMENT_FAILED: { amount: 49_000 },
+  SUBSCRIPTION_EXPIRED: { plan: 'اشتراک یک‌ماهه' },
 };
 
 const placeholders = (template: string): string[] =>

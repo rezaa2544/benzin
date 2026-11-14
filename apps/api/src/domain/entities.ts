@@ -1,5 +1,8 @@
 import type {
   DeliveryMethod,
+  PaymentMethod,
+  PaymentStatus,
+  SubscriptionStatus,
   ReputationEventKind,
   MessageKind,
   NotificationChannel,
@@ -71,6 +74,56 @@ export interface Message {
   readonly body: string;
   readonly clientMessageId: string | null;
   readAt: Date | null;
+  readonly createdAt: Date;
+}
+
+/** Sellable subscription plan (task E7-01). Prices are Toman, never Rial. */
+export interface Plan {
+  readonly id: string;
+  readonly code: string;
+  readonly nameFa: string;
+  readonly durationDays: number;
+  readonly priceToman: number;
+  /** Extra open-order slots granted while the subscription is active. */
+  readonly maxActiveOrders: number;
+  readonly isActive: boolean;
+}
+
+export interface Subscription {
+  readonly id: string;
+  readonly userId: string;
+  readonly planId: string;
+  status: SubscriptionStatus;
+  startsAt: Date;
+  endsAt: Date;
+  readonly createdAt: Date;
+}
+
+export interface Payment {
+  readonly id: string;
+  readonly userId: string;
+  readonly subscriptionId: string | null;
+  readonly provider: PaymentMethod;
+  status: PaymentStatus;
+  readonly amountToman: number;
+  authority: string | null;
+  reference: string | null;
+  /** Card-to-card transfers are matched by this unique amount (E7-04). */
+  readonly uniqueAmountToman: number | null;
+  readonly rawPayload: Record<string, unknown>;
+  paidAt: Date | null;
+  readonly expiresAt: Date;
+  readonly createdAt: Date;
+}
+
+/** Destination card shown to the payer; never returned raw (task E7-07). */
+export interface PaymentCard {
+  readonly id: string;
+  readonly cardNumber: string;
+  readonly holderName: string;
+  readonly bankName: string | null;
+  isActive: boolean;
+  readonly dailyLimit: number | null;
   readonly createdAt: Date;
 }
 

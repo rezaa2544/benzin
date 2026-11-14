@@ -1,5 +1,7 @@
 import type {
   MessageKind,
+  PaymentMethod,
+  PaymentStatus,
   ReputationEventKind,
   NotificationKind,
   OrderSide,
@@ -18,7 +20,11 @@ import type {
   Message,
   NotificationRecord,
   Order,
+  Payment,
+  PaymentCard,
+  Plan,
   RefreshTokenRecord,
+  Subscription,
   Reservation,
   SettingsRecord,
   User,
@@ -228,6 +234,90 @@ export interface ReputationRepository {
   createRating(input: NewTradeRating, at: Date): Promise<TradeRating | null>;
 }
 
+export interface PlanRepository {
+  listActive(): Promise<Plan[]>;
+  findById(id: string): Promise<Plan | null>;
+  findByCode(code: string): Promise<Plan | null>;
+  upsert(plan: Plan): Promise<Plan>;
+}
+
+export interface NewSubscription {
+  userId: string;
+  planId: string;
+  startsAt: Date;
+  endsAt: Date;
+}
+
+export interface SubscriptionRepository {
+  create(input: NewSubscription): Promise<Subscription>;
+  findById(id: string): Promise<Subscription | null>;
+  /** The subscription that covers `now` for this user, latest window wins. */
+  findActiveByUser(userId: string, now: Date): Promise<Subscription | null>;
+  activate(id: string, startsAt: Date, endsAt: Date): Promise<Subscription | null>;
+  listDueExpiry(now: Date, limit: number): Promise<Subscription[]>;
+  expire(id: string): Promise<Subscription | null>;
+  listByUser(userId: string, limit: number): Promise<Subscription[]>;
+}
+
+export interface NewPayment {
+  userId: string;
+  subscriptionId: string | null;
+  provider: PaymentMethod;
+  amountToman: number;
+  uniqueAmountToman: number | null;
+  expiresAt: Date;
+}
+
+export interface PaymentRepository {
+  /** Returns null when `uniqueAmountToman` collides with another PENDING payment. */
+  create(input: NewPayment, at: Date): Promise<Payment | null>;
+  findById(id: string): Promise<Payment | null>;
+  findByAuthority(authority: string): Promise<Payment | null>;
+  findByUniqueAmount(amountToman: number): Promise<Payment | null>;
+  transition(
+    id: string,
+    expected: PaymentStatus,
+    next: PaymentStatus,
+    patch?: Partial<Pick<Payment, 'paidAt' | 'reference' | 'authority'>>,
+  ): Promise<Payment | null>;
+  listPendingExpired(now: Date, limit: number): Promise<Payment[]>;
+  listByUser(userId: string, limit: number): Promise<Payment[]>;
+  listAll(options: { status: PaymentStatus | null; limit: number }): Promise<Payment[]>;
+}
+
+export interface PaymentCardRepository {
+  list(activeOnly: boolean): Promise<PaymentCard[]>;
+  findById(id: string): Promise<PaymentCard | null>;
+  create(input: Omit<PaymentCard, 'id' | 'createdAt' | 'isActive'>, at: Date): Promise<PaymentCard>;
+  deactivate(id: string): Promise<PaymentCard | null>;
+}
+
+/** Result of starting a payment with a provider. */
+export interface PaymentInitResult {
+  /** Where to send the user (gateway only). */
+  redirectUrl: string | null;
+  /** Provider-side handle (gateway authority). */
+  authority: string | null;
+  destination: { cardNumber: string; holderName: string; bankName: string | null } | null;
+  uniqueAmountToman: number | null;
+}
+
+export interface PaymentProvider {
+  readonly kind: PaymentMethod;
+  init(input: {
+    paymentId: string;
+    amountToman: number;
+    uniqueAmountToman: number | null;
+    descriptionFa: string;
+  }): Promise<PaymentInitResult>;
+  verify(input: {
+    paymentId: string;
+    amountToman: number;
+    authority: string | null;
+    reference: string | null;
+  }): Promise<{ ok: boolean; reference: string | null; reason: string | null }>;
+}
+
 export interface NewNotification {
   userId: string;
   channel: 'IN_APP' | 'SMS' | 'PUSH';
@@ -341,6 +431,10 @@ export interface Repositories {
   users: UserRepository;
   conversations: ConversationRepository;
   reputation: ReputationRepository;
+  plans: PlanRepository;
+  subscriptions: SubscriptionRepository;
+  payments: PaymentRepository;
+  paymentCards: PaymentCardRepository;
   messages: MessageRepository;
   notifications: NotificationRepository;
   otps: OtpRepository;

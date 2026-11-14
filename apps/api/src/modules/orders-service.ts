@@ -70,7 +70,10 @@ const decodeCursor = (cursor: string | undefined): number => {
 
 export class OrderService {
   constructor(
-    private readonly repos: Pick<Repositories, 'orders' | 'audit' | 'zones' | 'reservations'>,
+    private readonly repos: Pick<
+      Repositories,
+      'orders' | 'audit' | 'zones' | 'reservations' | 'subscriptions' | 'plans'
+    >,
     private readonly settings: SettingsService,
     private readonly clock: Clock,
     private readonly distance: DistanceService = new Distance(null),
@@ -118,10 +121,17 @@ export class OrderService {
       });
     }
 
+    // Plans widen the open-order allowance; the paid gate itself is off by default (A23).
+    const subscription = await this.repos.subscriptions.findActiveByUser(user.id, now);
+    if (!subscription && config['subscription.required_for_orders']) {
+      throw new AppError('SUBSCRIPTION_REQUIRED', 403, 'An active subscription is required');
+    }
+    const plan = subscription ? await this.repos.plans.findById(subscription.planId) : null;
+    const openLimit = Math.max(config['order.max_open_per_user'], plan?.maxActiveOrders ?? 0);
     const openOrders = await this.repos.orders.countOpenByOwner(user.id, now);
-    if (openOrders >= config['order.max_open_per_user']) {
+    if (openOrders >= openLimit) {
       throw new AppError('ORDER_LIMIT_REACHED', 429, 'Too many open orders', {
-        limit: config['order.max_open_per_user'],
+        limit: openLimit,
       });
     }
 

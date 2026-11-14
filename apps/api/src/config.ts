@@ -28,6 +28,11 @@ const envSchema = z.object({
         .map((origin) => origin.trim())
         .filter(Boolean),
     ),
+  /** `sandbox` approves payments locally; `zarinpal` calls the real bank gateway. */
+  PAYMENT_GATEWAY: z.enum(['sandbox', 'zarinpal']).default('sandbox'),
+  ZARINPAL_MERCHANT_ID: z.string().min(8).optional(),
+  ZARINPAL_BASE_URL: z.string().url().default('https://payment.zarinpal.com'),
+  PAYMENT_CALLBACK_URL: z.string().url().default('https://app.benzin.ir/payments/callback'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 });
 
