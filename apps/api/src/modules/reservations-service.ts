@@ -34,7 +34,7 @@ export const toReservationView = (reservation: Reservation): ReservationView => 
 
 export class ReservationService {
   constructor(
-    private readonly repos: Pick<Repositories, 'orders' | 'reservations' | 'audit'>,
+    private readonly repos: Pick<Repositories, 'orders' | 'reservations' | 'audit' | 'users'>,
     private readonly settings: SettingsService,
     private readonly clock: Clock,
   ) {}
@@ -215,6 +215,87 @@ export class ReservationService {
     return toReservationView(updated);
   }
 
+  /**
+   * E4-05: phone numbers are a two-sided secret. They are released only after the owner
+   * accepted the request, and only to the two parties — every release is audited.
+   */
+  async revealContact(
+    actor: User,
+    id: string,
+  ): Promise<{
+    reservationId: string;
+    orderId: string;
+    revealedAt: string;
+    owner: { id: string; phone: string };
+    taker: { id: string; phone: string };
+  }> {
+    const { reservation, order } = await this.load(id);
+    const isOwner = order.ownerId === actor.id;
+    const isTaker = reservation.takerId === actor.id;
+    if (!isOwner && !isTaker) {
+      throw AppError.forbidden('NOT_RESERVATION_PARTY', 'Not a party to this reservation');
+    }
+    if (reservation.status !== 'CONFIRMED' && reservation.status !== 'COMPLETED') {
+      throw new AppError('CONFLICT', 409, 'Contact details stay hidden until the owner accepts', {
+        status: reservation.status,
+      });
+    }
+    const owner = await this.repos.users.findById(order.ownerId);
+    const taker = await this.repos.users.findById(reservation.takerId);
+    if (!owner || !taker) throw AppError.notFound('NOT_FOUND', 'Party disappeared');
+
+    await this.repos.audit.append({
+      actorId: actor.id,
+      action: 'contact.revealed',
+      entity: 'reservation',
+      entityId: id,
+      metadata: { orderId: order.id, by: isOwner ? 'OWNER' : 'TAKER' },
+    });
+
+    return {
+      reservationId: id,
+      orderId: order.id,
+      revealedAt: this.clock.now().toISOString(),
+      owner: { id: owner.id, phone: owner.phone },
+      taker: { id: taker.id, phone: taker.phone },
+    };
+  }
+
+  /**
+   * E4-04: an unfinished trade can be escalated. The state machine owns the legal
+   * transitions (`CONFIRMED → DISPUTED` on both the reservation and its order), so a
+   * dispute can never skip the acceptance step.
+   */
+  async dispute(actor: User, id: string, reason: string | null): Promise<ReservationView> {
+    const { reservation, order } = await this.load(id);
+    const isOwner = order.ownerId === actor.id;
+    const isTaker = reservation.takerId === actor.id;
+    const isStaff = actor.role !== 'USER';
+    if (!isOwner && !isTaker && !isStaff) {
+      throw AppError.forbidden('NOT_RESERVATION_PARTY', 'Not a party to this reservation');
+    }
+    const actorKind = isOwner ? 'OWNER' : isTaker ? 'TAKER' : 'ADMIN';
+    const next = nextReservationStatus(reservation.status, 'DISPUTE', actorKind);
+    const orderNext = nextOrderStatus(order.status, 'DISPUTE', actorKind);
+
+    const updated = await this.repos.reservations.transition(id, reservation.status, next, {
+      decidedAt: reservation.decidedAt ?? this.clock.now(),
+      cancelReason: null,
+    });
+    if (!updated) throw AppError.conflict('CONFLICT', 'Reservation changed while disputing');
+    const updatedOrder = await this.repos.orders.transition(order.id, order.status, orderNext);
+    if (!updatedOrder) throw AppError.conflict('CONFLICT', 'Order changed while disputing');
+
+    await this.repos.audit.append({
+      actorId: actor.id,
+      action: 'reservation.disputed',
+      entity: 'reservation',
+      entityId: id,
+      metadata: { orderId: order.id, by: actorKind, reason },
+    });
+    return toReservationView(updated);
+  }
+
   async listMine(user: User, limit = 20): Promise<ReservationView[]> {
     const reservations = await this.repos.reservations.listByTaker(user.id, limit);
     return reservations.map(toReservationView);
@@ -227,6 +308,39 @@ export class ReservationService {
       'EXPIRED',
     );
     if (expired) await this.repos.orders.transition(order.id, 'RESERVED', 'OPEN');
+  }
+
+  /**
+   * E4-02/E4-04: confirmed trades that nobody closed auto-complete after
+   * `trade.auto_complete_hours`, so a forgotten order cannot sit in limbo forever.
+   */
+  async autoCompleteDueTrades(limit = 200): Promise<number> {
+    const config = await this.settings.get();
+    const now = this.clock.now();
+    const windowMs = config['trade.auto_complete_hours'] * 3_600_000;
+    const candidates = await this.repos.reservations.listAll(limit);
+    let count = 0;
+    for (const reservation of candidates) {
+      if (reservation.status !== 'CONFIRMED' || !reservation.decidedAt) continue;
+      if (reservation.decidedAt.getTime() + windowMs > now.getTime()) continue;
+      const completed = await this.repos.reservations.transition(
+        reservation.id,
+        'CONFIRMED',
+        'AUTO_COMPLETED',
+        { completedAt: now },
+      );
+      if (!completed) continue;
+      await this.repos.orders.transition(reservation.orderId, 'CONFIRMED', 'COMPLETED');
+      await this.repos.audit.append({
+        actorId: null,
+        action: 'reservation.auto_completed',
+        entity: 'reservation',
+        entityId: reservation.id,
+        metadata: { orderId: reservation.orderId, hours: config['trade.auto_complete_hours'] },
+      });
+      count += 1;
+    }
+    return count;
   }
 
   /** Releases orders whose owner-decision window elapsed. Called by the scheduler. */

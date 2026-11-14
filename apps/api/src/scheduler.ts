@@ -3,7 +3,11 @@ import type { OrderService } from './modules/orders-service.js';
 import type { ReservationService } from './modules/reservations-service.js';
 
 export interface Scheduler {
-  tick(): Promise<{ expiredReservations: number; expiredOrders: number }>;
+  tick(): Promise<{
+    expiredReservations: number;
+    expiredOrders: number;
+    autoCompletedTrades: number;
+  }>;
   start(intervalMs?: number): () => void;
 }
 
@@ -19,6 +23,7 @@ export function createScheduler(
   const tick = async () => ({
     expiredReservations: await reservations.expireDueReservations(),
     expiredOrders: await orders.expireDueOrders(),
+    autoCompletedTrades: await reservations.autoCompleteDueTrades(),
   });
 
   return {

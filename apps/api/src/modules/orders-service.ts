@@ -70,7 +70,7 @@ const decodeCursor = (cursor: string | undefined): number => {
 
 export class OrderService {
   constructor(
-    private readonly repos: Pick<Repositories, 'orders' | 'audit' | 'zones'>,
+    private readonly repos: Pick<Repositories, 'orders' | 'audit' | 'zones' | 'reservations'>,
     private readonly settings: SettingsService,
     private readonly clock: Clock,
     private readonly distance: DistanceService = new Distance(null),
@@ -107,6 +107,14 @@ export class OrderService {
     const zone = await this.repos.zones.findById(zoneId);
     if (!zone || !zone.isActive) {
       throw new AppError('ZONE_NOT_SUPPORTED', 422, 'Zone is not served yet', { zoneId });
+    }
+
+    // E4-06: one trade cycle at a time — an active reservation blocks new listings.
+    const activeTrades = await this.repos.reservations.findActiveByTaker(user.id);
+    if (activeTrades.length > 0) {
+      throw new AppError('TRADE_CYCLE_BLOCKED', 409, 'Finish your active trade first', {
+        reservationId: activeTrades[0]!.id,
+      });
     }
 
     const openOrders = await this.repos.orders.countOpenByOwner(user.id, now);
