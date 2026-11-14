@@ -3,6 +3,7 @@ import { formatJalaliDate, formatJalaliDateTime, toPersianDigits } from '@benzin
 import type { ApiClient } from '../lib/api.js';
 import { errorMessage } from '../lib/api.js';
 import type { DeviceView, PublicUser, ReputationSummary, SubscriptionView } from '../lib/types.js';
+import { validateDisplayName } from '../lib/profile.js';
 import { navigate } from '../lib/router.js';
 import { useResource } from '../lib/useResource.js';
 import { t } from '../lib/i18n.js';
@@ -12,6 +13,8 @@ import { Notice, PageTitle, Skeleton } from './parts.js';
 export interface ProfilePageProps {
   api: ApiClient;
   user: PublicUser;
+  /** Keeps the cached session in sync after a rename. */
+  onUser: (user: PublicUser) => void;
   onLogout: () => void;
 }
 
@@ -22,10 +25,14 @@ const errorMap = {
 };
 
 /** Profile & reputation (E9-12): who I am, how I look to others, and how to sign out. */
-export function ProfilePage({ api, user, onLogout }: ProfilePageProps): JSX.Element {
+export function ProfilePage({ api, user, onUser, onLogout }: ProfilePageProps): JSX.Element {
   const [sheet, setSheet] = useState<'logout' | 'logoutAll' | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [name, setName] = useState(user.displayName ?? '');
+  const [nameError, setNameError] = useState<string | null>(null);
+  const [nameSaved, setNameSaved] = useState(false);
+  const [savingName, setSavingName] = useState(false);
 
   const load = useCallback(async () => {
     const [reputation, devices, subscription] = await Promise.all([
@@ -39,6 +46,30 @@ export function ProfilePage({ api, user, onLogout }: ProfilePageProps): JSX.Elem
   }, [api]);
 
   const { data, loading, error: loadError } = useResource(load, [api]);
+
+  /** E1-05: only the display name is editable; it is what the counterpart sees. */
+  const saveName = async (): Promise<void> => {
+    const result = validateDisplayName(name, {
+      tooShort: t('profile.nameTooShort'),
+      tooLong: t('profile.nameTooLong'),
+      phoneLike: t('profile.namePhoneLike'),
+    });
+    setNameError(result.error);
+    setNameSaved(false);
+    if (result.error) return;
+    setSavingName(true);
+    setError(null);
+    try {
+      const updated = await api.patch<PublicUser>('/v1/me', { displayName: result.displayName });
+      onUser(updated);
+      setName(updated.displayName ?? '');
+      setNameSaved(true);
+    } catch (cause) {
+      setError(errorMessage(cause, errorMap));
+    } finally {
+      setSavingName(false);
+    }
+  };
 
   const logout = async (all: boolean): Promise<void> => {
     setSheet(null);
@@ -77,6 +108,47 @@ export function ProfilePage({ api, user, onLogout }: ProfilePageProps): JSX.Elem
             </>
           ) : null}
         </dl>
+      </div>
+
+      <div className="card mb-3">
+        <label className="label" htmlFor="profile-name">
+          {t('profile.displayName')}
+        </label>
+        <div className="flex items-end gap-2">
+          <input
+            id="profile-name"
+            className="input flex-1"
+            value={name}
+            maxLength={60}
+            aria-invalid={Boolean(nameError)}
+            aria-describedby={nameError ? 'profile-name-error' : 'profile-name-hint'}
+            onChange={(event) => {
+              setName(event.target.value);
+              setNameSaved(false);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') void saveName();
+            }}
+          />
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={savingName}
+            onClick={() => void saveName()}
+          >
+            {savingName ? t('profile.saving') : t('profile.save')}
+          </button>
+        </div>
+        {nameError ? (
+          <p id="profile-name-error" role="alert" className="mt-1 text-xs text-danger">
+            {nameError}
+          </p>
+        ) : (
+          <p id="profile-name-hint" className="mt-1 text-xs text-muted">
+            {t('profile.displayNameHint')}
+          </p>
+        )}
+        {nameSaved ? <Notice tone="success">{t('profile.saved')}</Notice> : null}
       </div>
 
       {loading ? (

@@ -7,6 +7,7 @@ import type { AuthService } from '../modules/auth-service.js';
 import type { ChatService } from '../modules/chat-service.js';
 import type { NotificationService } from '../modules/notification-service.js';
 import type { PaymentService } from '../modules/payment-service.js';
+import type { ProfileService } from '../modules/profile-service.js';
 import type { ReputationService } from '../modules/reputation-service.js';
 import type { OrderService } from '../modules/orders-service.js';
 import type { ReservationService } from '../modules/reservations-service.js';
@@ -22,6 +23,7 @@ export interface AppServices {
   orders: OrderService;
   reservations: ReservationService;
   settings: SettingsService;
+  profile: ProfileService;
   admin: AdminService;
   stats: StatsService;
 }

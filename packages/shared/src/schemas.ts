@@ -280,6 +280,24 @@ export const adminUserQuerySchema = z
 export type AdminUserQuery = z.infer<typeof adminUserQuerySchema>;
 
 /** Role changes, profile edits and manual suspensions, all audited (task E8-02). */
+/** Self-service profile (task E1-05). The display name is the only editable field in v1;
+ *  the phone is the identity and changes only by verifying a new number with OTP. */
+export const updateProfileSchema = z
+  .object({
+    displayName: z
+      .string()
+      .trim()
+      .min(2)
+      .max(60)
+      .nullable()
+      .refine((value) => value === null || !/^[\d\s+\-()]+$/.test(value), {
+        message: 'DISPLAY_NAME_INVALID',
+      }),
+  })
+  .strict();
+
+export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
+
 export const adminUpdateUserSchema = z
   .object({
     role: z.enum(USER_ROLES).optional(),
