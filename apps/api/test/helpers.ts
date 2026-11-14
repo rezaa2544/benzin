@@ -3,6 +3,7 @@ import { buildApp } from '../src/http/app.js';
 import { loadConfig } from '../src/config.js';
 import { createMemoryRepositories } from '../src/infra/memory/index.js';
 import { systemClock, type Clock } from '../src/domain/entities.js';
+import { BANEH_ZONE } from '../src/infra/db/seed.js';
 import type { Repositories, SmsSender } from '../src/ports.js';
 import type { UserRole } from '@benzin/shared';
 import { signAccessToken } from '../src/modules/tokens.js';
@@ -59,6 +60,8 @@ export async function createTestContext(clock: Clock = systemClock): Promise<Tes
     sms,
     clock,
   });
+  // Every test context starts in the seeded coverage area (task E1-02).
+  await repos.zones.upsert(BANEH_ZONE);
   await app.ready();
   return { app, repos, sms, clock, close: () => app.close() };
 }
@@ -103,7 +106,8 @@ export async function loginAsRole(
   return { token: mintAccessToken(user), userId: user.id };
 }
 
-export const ZONE_ID = '6f9619ff-8b86-d011-b42d-00c04fc964ff';
+/** The seeded zone (Baneh). Tests that need "outside coverage" use a coordinate far away. */
+export const ZONE_ID = BANEH_ZONE.id;
 
 export const orderPayload = (overrides: Record<string, unknown> = {}) => ({
   side: 'SELL',

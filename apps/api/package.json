@@ -11,8 +11,11 @@
     "test": "vitest run",
     "lint": "eslint .",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
-    "db:studio": "drizzle-kit studio"
+    "db:migrate": "tsx src/infra/db/cli.ts migrate",
+    "db:studio": "drizzle-kit studio",
+    "db:seed": "tsx src/infra/db/cli.ts seed",
+    "db:reset": "tsx src/infra/db/cli.ts reset",
+    "db:status": "tsx src/infra/db/cli.ts status"
   },
   "dependencies": {
     "@benzin/shared": "workspace:*",

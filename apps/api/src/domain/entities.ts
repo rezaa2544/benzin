@@ -49,6 +49,17 @@ export interface Reservation {
   cancelReason: string | null;
 }
 
+export interface ZoneRecord {
+  readonly id: string;
+  readonly slug: string;
+  readonly nameFa: string;
+  readonly city: string;
+  readonly province: string;
+  isActive: boolean;
+  /** Exterior ring as [lng, lat] pairs (GeoJSON order). */
+  readonly boundary: readonly (readonly [number, number])[];
+}
+
 export interface DeviceRecord {
   readonly id: string;
   readonly userId: string;

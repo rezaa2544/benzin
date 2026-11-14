@@ -12,6 +12,7 @@ import {
   refreshTokenSchema,
   requestOtpSchema,
   verifyOtpSchema,
+  zoneLocateSchema,
   fieldErrors,
 } from '@benzin/shared';
 import type { Config } from '../config.js';
@@ -192,6 +193,38 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   app.get('/v1/me', { preHandler: requireAuth }, async (request) =>
     toPublicUser(currentUser(request)),
   );
+
+  // --------------------------------------------------------------- zones
+  app.get('/v1/zones', { preHandler: requireAuth }, async () => {
+    const zones = await repos.zones.listActive();
+    return {
+      items: zones.map((zone) => ({
+        id: zone.id,
+        slug: zone.slug,
+        nameFa: zone.nameFa,
+        city: zone.city,
+        province: zone.province,
+      })),
+    };
+  });
+
+  /** "Which city is this point in?" — answered by the GiST index on zones.boundary. */
+  app.get('/v1/zones/locate', { preHandler: requireAuth }, async (request) => {
+    const query = parseInput(zoneLocateSchema, request.query);
+    const zone = await repos.zones.findByPoint({ lat: query.lat, lng: query.lng });
+    return {
+      supported: zone !== null,
+      zone: zone
+        ? {
+            id: zone.id,
+            slug: zone.slug,
+            nameFa: zone.nameFa,
+            city: zone.city,
+            province: zone.province,
+          }
+        : null,
+    };
+  });
 
   // -------------------------------------------------------------- orders
   app.get('/v1/orders', { preHandler: requireAuth }, async (request) => {

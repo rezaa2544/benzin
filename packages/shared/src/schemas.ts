@@ -96,6 +96,15 @@ export const sendMessageSchema = z
   })
   .strict();
 
+export const zoneLocateSchema = z
+  .object({
+    lat: z.coerce.number().min(-90).max(90),
+    lng: z.coerce.number().min(-180).max(180),
+  })
+  .strict();
+
+export type ZoneLocateInput = z.infer<typeof zoneLocateSchema>;
+
 export const paginationSchema = z
   .object({
     cursor: z.string().max(128).optional(),
