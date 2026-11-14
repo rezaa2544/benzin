@@ -33,6 +33,8 @@ const envSchema = z.object({
   ZARINPAL_MERCHANT_ID: z.string().min(8).optional(),
   ZARINPAL_BASE_URL: z.string().url().default('https://payment.zarinpal.com'),
   PAYMENT_CALLBACK_URL: z.string().url().default('https://app.benzin.ir/payments/callback'),
+  /** Reported on the admin status screen (task E8-08). */
+  APP_VERSION: z.string().default('0.1.0'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 });
 

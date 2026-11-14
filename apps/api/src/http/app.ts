@@ -4,6 +4,12 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { ZodError } from 'zod';
 import {
   AppError,
+  adminAuditQuerySchema,
+  adminOrderQuerySchema,
+  adminResolveDisputeSchema,
+  adminSubscriptionQuerySchema,
+  adminUpdateUserSchema,
+  adminUserQuerySchema,
   cancelReservationSchema,
   chatMessagesQuerySchema,
   confirmPaymentSchema,
@@ -14,6 +20,8 @@ import {
   notificationQuerySchema,
   orderSearchSchema,
   paymentListSchema,
+  providerSettingSchema,
+  providerTestSchema,
   purchaseSubscriptionSchema,
   rejectPaymentSchema,
   originQuerySchema,
@@ -26,12 +34,14 @@ import {
   updateOrderSchema,
   verifyOtpSchema,
   zoneLocateSchema,
+  zoneUpsertSchema,
   fieldErrors,
 } from '@benzin/shared';
 import type { Config } from '../config.js';
 import type { Clock, User } from '../domain/entities.js';
 import type { ChatEventPublisher, Repositories, RouteProvider, SmsSender } from '../ports.js';
 import { NOOP_CHAT_EVENTS } from '../ports.js';
+import { AdminService } from '../modules/admin-service.js';
 import { AuthService } from '../modules/auth-service.js';
 import { ChatService } from '../modules/chat-service.js';
 import { DistanceService } from '../modules/distance-service.js';
@@ -119,6 +129,11 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   const hub: { publisher: ChatEventPublisher } = { publisher: NOOP_CHAT_EVENTS };
   const chat = new ChatService(repos, settings, clock, notifications, events);
   const stats = new StatsService(repos, settings, clock);
+  const admin = new AdminService(repos, settings, clock, notifications, reputation, sms, {
+    nodeEnv: config.NODE_ENV,
+    mode: config.DATABASE_URL ? 'postgres' : 'memory',
+    version: config.APP_VERSION,
+  });
   const services: AppServices = {
     auth,
     chat,
@@ -128,6 +143,8 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
     reputation,
     reservations,
     settings,
+    admin,
+    stats,
   };
   const requireAuth = authenticate(auth);
 
@@ -144,7 +161,7 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   await app.register(cors, {
     origin: config.CORS_ORIGINS,
     credentials: true,
-    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   });
 
   app.setErrorHandler((rawError: unknown, request, reply) => {
@@ -570,10 +587,85 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
     '/v1/admin/audit',
     { preHandler: [requireAuth, requireRole('ADMIN', 'OWNER')] },
     async (request) => {
-      const query = parseInput(paginationSchema, request.query);
-      return { items: await repos.audit.list(query.limit) };
+      const query = parseInput(adminAuditQuerySchema, request.query);
+      return admin.auditLog(query);
     },
   );
+
+  // ------------------------------------------------------- admin: users (E8-02)
+  const staffOnly = [requireAuth, requireRole('ADMIN', 'OWNER')] as const;
+
+  app.get('/v1/admin/users', { preHandler: [...staffOnly] }, async (request) => {
+    const query = parseInput(adminUserQuerySchema, request.query);
+    return admin.listUsers(query);
+  });
+
+  app.get('/v1/admin/users/:id', { preHandler: [...staffOnly] }, async (request) => {
+    const { id } = request.params as { id: string };
+    return admin.userDetail(id);
+  });
+
+  app.patch('/v1/admin/users/:id', { preHandler: [...staffOnly] }, async (request) => {
+    const { id } = request.params as { id: string };
+    const body = parseInput(adminUpdateUserSchema, request.body ?? {});
+    return admin.updateUser(currentUser(request), id, body);
+  });
+
+  // ------------------------------------------------------ admin: orders (E8-03)
+  app.get('/v1/admin/orders', { preHandler: [...staffOnly] }, async (request) => {
+    const query = parseInput(adminOrderQuerySchema, request.query);
+    return admin.listOrders(query);
+  });
+
+  app.get('/v1/admin/orders/:id', { preHandler: [...staffOnly] }, async (request) => {
+    const { id } = request.params as { id: string };
+    return admin.orderDetail(id);
+  });
+
+  app.post('/v1/admin/orders/:id/resolve', { preHandler: [...staffOnly] }, async (request) => {
+    const { id } = request.params as { id: string };
+    const body = parseInput(adminResolveDisputeSchema, request.body);
+    return admin.resolveDispute(currentUser(request), id, body);
+  });
+
+  // ----------------------------------------------- admin: subscriptions (E8-04)
+  app.get('/v1/admin/subscriptions', { preHandler: [...staffOnly] }, async (request) => {
+    const query = parseInput(adminSubscriptionQuerySchema, request.query);
+    return admin.listSubscriptions(query);
+  });
+
+  // --------------------------------------- admin: dashboard and status (E8-08)
+  app.get('/v1/admin/dashboard', { preHandler: [...staffOnly] }, async () => admin.dashboard());
+  app.get('/v1/admin/status', { preHandler: [...staffOnly] }, async () => admin.systemStatus());
+
+  // ------------------------------------------------ admin: providers (E8-06)
+  app.get('/v1/admin/providers', { preHandler: [...staffOnly] }, async () => admin.listProviders());
+
+  app.put('/v1/admin/providers', { preHandler: [...staffOnly] }, async (request) => {
+    const body = parseInput(providerSettingSchema, request.body);
+    return admin.saveProvider(currentUser(request), body);
+  });
+
+  app.post(
+    '/v1/admin/providers/:kind/:provider/test',
+    { preHandler: [...staffOnly] },
+    async (request) => {
+      const { kind, provider } = request.params as { kind: string; provider: string };
+      const body = parseInput(providerTestSchema, request.body ?? {});
+      if (kind !== 'SMS' && kind !== 'PAYMENT' && kind !== 'MAP') {
+        throw AppError.notFound('PROVIDER_NOT_FOUND', 'Unknown provider kind');
+      }
+      return admin.testProvider(currentUser(request), kind, provider, body.phone);
+    },
+  );
+
+  // ---------------------------------------------------- admin: cities (E8-07)
+  app.get('/v1/admin/zones', { preHandler: [...staffOnly] }, async () => admin.listZones());
+
+  app.put('/v1/admin/zones', { preHandler: [...staffOnly] }, async (request) => {
+    const body = parseInput(zoneUpsertSchema, request.body);
+    return admin.saveZone(currentUser(request), { ...body, boundary: [...body.boundary] });
+  });
 
   return { app, services, chatSocket };
 }

@@ -7,6 +7,7 @@ import type {
   OrderSide,
   OrderStatus,
   ReservationStatus,
+  SubscriptionStatus,
   Tier,
   UserRole,
   UserStatus,
@@ -28,12 +29,22 @@ import type {
   Reservation,
   SettingsRecord,
   User,
+  ProviderSetting,
   ZoneRecord,
 } from './domain/entities.js';
 
 export interface NewUser {
   phone: string;
   role?: UserRole;
+}
+
+/** Paged admin listing (task E8-02); text matches phone or display name. */
+export interface UserSearchQuery {
+  text: string | null;
+  role: UserRole | null;
+  status: UserStatus | null;
+  limit: number;
+  offset: number;
 }
 
 export interface UserRepository {
@@ -44,6 +55,9 @@ export interface UserRepository {
   create(input: NewUser): Promise<User>;
   save(user: User): Promise<User>;
   list(limit: number): Promise<User[]>;
+  search(query: UserSearchQuery): Promise<{ items: User[]; total: number }>;
+  /** Dashboard tile (task E8-08): counts grouped by status. */
+  countByStatus(): Promise<Record<UserStatus, number>>;
 }
 
 export interface OtpChallenge {
@@ -141,6 +155,16 @@ export interface OrderRepository {
   ): Promise<Order | null>;
   /** All orders of a zone created since `since`, newest first — input for market stats. */
   listSince(zoneId: string, since: Date, limit: number): Promise<Order[]>;
+  /** Admin listing across zones (task E8-03). */
+  listAll(query: {
+    status: OrderStatus | null;
+    zoneId: string | null;
+    side: OrderSide | null;
+    text: string | null;
+    limit: number;
+    offset: number;
+  }): Promise<{ items: Order[]; total: number }>;
+  countByStatus(): Promise<Record<OrderStatus, number>>;
 }
 
 export interface NewReservation {
@@ -171,6 +195,7 @@ export interface ReservationRepository {
   /** Every reservation of one order, newest first — chat access checks use this. */
   listByOrder(orderId: string, limit: number): Promise<Reservation[]>;
   listAll(limit: number): Promise<Reservation[]>;
+  countActive(): Promise<number>;
 }
 
 export interface NewMessage {
@@ -257,6 +282,12 @@ export interface SubscriptionRepository {
   listDueExpiry(now: Date, limit: number): Promise<Subscription[]>;
   expire(id: string): Promise<Subscription | null>;
   listByUser(userId: string, limit: number): Promise<Subscription[]>;
+  listAll(query: {
+    status: SubscriptionStatus | null;
+    limit: number;
+    offset: number;
+  }): Promise<{ items: Subscription[]; total: number }>;
+  countByStatus(): Promise<Record<SubscriptionStatus, number>>;
 }
 
 export interface NewPayment {
@@ -283,6 +314,14 @@ export interface PaymentRepository {
   listPendingExpired(now: Date, limit: number): Promise<Payment[]>;
   listByUser(userId: string, limit: number): Promise<Payment[]>;
   listAll(options: { status: PaymentStatus | null; limit: number }): Promise<Payment[]>;
+  /** Revenue tiles: settled volume since `since` plus how many are waiting or failed. */
+  summary(since: Date): Promise<{
+    paidCount: number;
+    paidToman: number;
+    pendingCount: number;
+    failedCount: number;
+    expiredCount: number;
+  }>;
 }
 
 export interface PaymentCardRepository {
@@ -391,7 +430,19 @@ export interface ZoneRepository {
   findById(id: string): Promise<ZoneRecord | null>;
   findBySlug(slug: string): Promise<ZoneRecord | null>;
   listActive(): Promise<ZoneRecord[]>;
+  /** Every zone, active or not — the city management screen (task E8-07). */
+  listAll(): Promise<ZoneRecord[]>;
   upsert(zone: ZoneRecord): Promise<ZoneRecord>;
+}
+
+/** Provider credentials edited from the panel (task E8-06). */
+export interface ProviderSettingsRepository {
+  list(): Promise<ProviderSetting[]>;
+  findBy(kind: ProviderSetting['kind'], provider: string): Promise<ProviderSetting | null>;
+  upsert(
+    input: Omit<ProviderSetting, 'id' | 'updatedAt'> & { id?: string },
+    at: Date,
+  ): Promise<ProviderSetting>;
 }
 
 export interface SettingsRepository {
@@ -399,9 +450,19 @@ export interface SettingsRepository {
   set(key: string, value: unknown, updatedBy: string | null): Promise<SettingsRecord>;
 }
 
+export interface AuditQuery {
+  action: string | null;
+  actorId: string | null;
+  entity: string | null;
+  limit: number;
+  offset: number;
+}
+
 export interface AuditRepository {
   append(entry: Omit<AuditEntry, 'id' | 'createdAt'>): Promise<AuditEntry>;
   list(limit: number): Promise<AuditEntry[]>;
+  /** Filtered audit browser (task E8-09). */
+  query(input: AuditQuery): Promise<{ items: AuditEntry[]; total: number }>;
 }
 
 /** Result of a drive between two points. */
@@ -435,6 +496,7 @@ export interface Repositories {
   subscriptions: SubscriptionRepository;
   payments: PaymentRepository;
   paymentCards: PaymentCardRepository;
+  providerSettings: ProviderSettingsRepository;
   messages: MessageRepository;
   notifications: NotificationRepository;
   otps: OtpRepository;

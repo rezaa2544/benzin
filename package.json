@@ -17,7 +17,8 @@
     "format": "prettier --write \"**/*.{ts,tsx,json,md,yml,yaml,css}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,json,md,yml,yaml,css}\"",
     "prepare": "husky || true",
-    "commitlint": "commitlint --edit"
+    "commitlint": "commitlint --edit",
+    "dev:admin": "pnpm --filter @benzin/admin dev"
   },
   "devDependencies": {
     "@commitlint/cli": "^19.6.0",
