@@ -293,6 +293,19 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
     return reservations.complete(currentUser(request), id);
   });
 
+  app.get('/v1/reservations/:id/contact', { preHandler: requireAuth }, async (request) => {
+    const { id } = request.params as { id: string };
+    return reservations.revealContact(currentUser(request), id);
+  });
+
+  app.post('/v1/reservations/:id/dispute', { preHandler: requireAuth }, async (request) => {
+    const { id } = request.params as { id: string };
+    const body = (request.body ?? {}) as { reason?: unknown };
+    const reason =
+      typeof body.reason === 'string' && body.reason.trim() ? body.reason.trim() : null;
+    return reservations.dispute(currentUser(request), id, reason);
+  });
+
   app.post('/v1/reservations/:id/cancel', { preHandler: requireAuth }, async (request) => {
     const { id } = request.params as { id: string };
     const body = parseInput(cancelReservationSchema, request.body ?? {});
