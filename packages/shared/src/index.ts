@@ -3,6 +3,7 @@ export * from './enums.js';
 export * from './errors.js';
 export * from './format.js';
 export * from './notifications.js';
+export * from './reputation.js';
 export * from './settings.js';
 export * from './schemas.js';
 export * from './state-machine.js';

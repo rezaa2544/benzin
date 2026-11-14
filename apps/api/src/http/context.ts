@@ -5,6 +5,7 @@ import type { User } from '../domain/entities.js';
 import type { AuthService } from '../modules/auth-service.js';
 import type { ChatService } from '../modules/chat-service.js';
 import type { NotificationService } from '../modules/notification-service.js';
+import type { ReputationService } from '../modules/reputation-service.js';
 import type { OrderService } from '../modules/orders-service.js';
 import type { ReservationService } from '../modules/reservations-service.js';
 import type { SettingsService } from '../modules/settings-service.js';
@@ -13,6 +14,7 @@ export interface AppServices {
   auth: AuthService;
   chat: ChatService;
   notifications: NotificationService;
+  reputation: ReputationService;
   orders: OrderService;
   reservations: ReservationService;
   settings: SettingsService;

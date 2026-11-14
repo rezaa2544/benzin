@@ -20,6 +20,9 @@ export const NOTIFICATION_KINDS = [
   'ORDER_EXPIRED',
   'CONTACT_SHARED',
   'CHAT_MESSAGE',
+  'RATING_RECEIVED',
+  'ACCOUNT_SUSPENDED',
+  'ACCOUNT_RESTORED',
 ] as const;
 
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
@@ -89,6 +92,22 @@ export const NOTIFICATION_TEMPLATES: Record<NotificationKind, NotificationTempla
     titleFa: 'پیام جدید در چت',
     bodyFa: '{by} پیام جدیدی برای سفارش {litres} لیتر فرستاد.',
     smsFa: null,
+  },
+  RATING_RECEIVED: {
+    titleFa: 'امتیاز جدید دریافت شد',
+    bodyFa: 'هم‌معامله‌ی شما {stars} از ۵ ستاره داد. امتیاز اعتبار شما اکنون {score} است.',
+    smsFa: null,
+  },
+  ACCOUNT_SUSPENDED: {
+    titleFa: 'حساب شما موقتاً تعلیق شد',
+    bodyFa:
+      'امتیاز اعتبار شما به {score} رسید و حساب تا {hours} ساعت محدود شد. برای بررسی با پشتیبانی تماس بگیرید.',
+    smsFa: 'حساب شما موقتاً تعلیق شد. بنزین',
+  },
+  ACCOUNT_RESTORED: {
+    titleFa: 'تعلیق حساب برداشته شد',
+    bodyFa: 'محدودیت حساب شما پایان یافت. امتیاز اعتبار: {score}.',
+    smsFa: 'تعلیق حساب شما برداشته شد. بنزین',
   },
 };
 

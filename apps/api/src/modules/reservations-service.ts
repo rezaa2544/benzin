@@ -7,7 +7,13 @@ import {
   type Settings,
 } from '@benzin/shared';
 import type { Clock, Order, Reservation, User } from '../domain/entities.js';
-import { NOOP_NOTIFIER, type NotificationEmitter, type Repositories } from '../ports.js';
+import {
+  NOOP_NOTIFIER,
+  NOOP_REPUTATION,
+  type NotificationEmitter,
+  type ReputationRecorder,
+  type Repositories,
+} from '../ports.js';
 import type { SettingsService } from './settings-service.js';
 
 export interface ReservationView {
@@ -40,6 +46,7 @@ export class ReservationService {
     private readonly settings: SettingsService,
     private readonly clock: Clock,
     private readonly notifier: NotificationEmitter = NOOP_NOTIFIER,
+    private readonly reputation: ReputationRecorder = NOOP_REPUTATION,
   ) {}
 
   /** Sends one Persian notification; a notifier failure must never fail the trade. */
@@ -220,6 +227,12 @@ export class ReservationService {
       entityId: id,
       metadata: { reason, by: actorKind },
     });
+    await this.reputation.record({
+      userId: actor.id,
+      kind: isOwner ? 'OWNER_CANCELLED' : 'TAKER_CANCELLED',
+      orderId: order.id,
+      metadata: { reservationId: id, reason },
+    });
     const peerId = isOwner ? reservation.takerId : order.ownerId;
     await this.notify(
       peerId,
@@ -254,6 +267,14 @@ export class ReservationService {
       entityId: id,
       metadata: { by: actorKind },
     });
+    for (const userId of [order.ownerId, reservation.takerId]) {
+      await this.reputation.record({
+        userId,
+        kind: 'TRADE_COMPLETED',
+        orderId: order.id,
+        metadata: { reservationId: id },
+      });
+    }
     await this.notify(
       actorKind === 'TAKER' ? order.ownerId : reservation.takerId,
       'TRADE_COMPLETED',
@@ -341,6 +362,14 @@ export class ReservationService {
       entityId: id,
       metadata: { orderId: order.id, by: actorKind, reason },
     });
+    for (const userId of [order.ownerId, reservation.takerId]) {
+      await this.reputation.record({
+        userId,
+        kind: 'DISPUTE_OPENED',
+        orderId: order.id,
+        metadata: { reservationId: id, by: actorKind },
+      });
+    }
     const recipients =
       actorKind === 'ADMIN'
         ? [order.ownerId, reservation.takerId]
@@ -409,6 +438,12 @@ export class ReservationService {
       const litres = order?.litres ?? 0;
       for (const userId of [order?.ownerId, reservation.takerId]) {
         if (!userId) continue;
+        await this.reputation.record({
+          userId,
+          kind: 'TRADE_AUTO_COMPLETED',
+          orderId: reservation.orderId,
+          metadata: { reservationId: reservation.id },
+        });
         await this.notify(
           userId,
           'TRADE_AUTO_COMPLETED',

@@ -29,6 +29,7 @@ import type {
 } from '../../ports.js';
 import { ACTIVE_RESERVATION_STATUSES } from '@benzin/shared';
 import { MemoryConversationRepository, MemoryMessageRepository } from './chat.js';
+import { MemoryReputationRepository } from './reputation.js';
 import { MemoryNotificationRepository } from './notifications.js';
 import { MemoryZoneRepository } from './zones.js';
 
@@ -62,6 +63,7 @@ export class MemoryUserRepository implements UserRepository {
       displayName: null,
       role: input.role ?? 'USER',
       status: 'ACTIVE',
+      suspendedUntil: null,
       createdAt: new Date(),
     };
     this.byId.set(user.id, clone(user));
@@ -77,6 +79,18 @@ export class MemoryUserRepository implements UserRepository {
 
   async list(limit: number): Promise<User[]> {
     return [...this.byId.values()].slice(0, limit).map(clone);
+  }
+
+  async listSuspendedDue(now: Date, limit: number): Promise<User[]> {
+    return [...this.byId.values()]
+      .filter(
+        (user) =>
+          user.status === 'SUSPENDED' &&
+          user.suspendedUntil !== null &&
+          user.suspendedUntil.getTime() <= now.getTime(),
+      )
+      .slice(0, limit)
+      .map(clone);
   }
 }
 
@@ -443,6 +457,7 @@ export function createMemoryRepositories(): Repositories {
     conversations: new MemoryConversationRepository(orders, reservations),
     messages: new MemoryMessageRepository(),
     notifications: new MemoryNotificationRepository(),
+    reputation: new MemoryReputationRepository(),
     otps: new MemoryOtpRepository(),
     refreshTokens: new MemoryRefreshTokenRepository(),
     devices: new MemoryDeviceRepository(),

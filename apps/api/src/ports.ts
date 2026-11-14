@@ -1,5 +1,6 @@
 import type {
   MessageKind,
+  ReputationEventKind,
   NotificationKind,
   OrderSide,
   OrderStatus,
@@ -11,6 +12,8 @@ import type {
 import type {
   AuditEntry,
   Conversation,
+  ReputationEvent,
+  TradeRating,
   DeviceRecord,
   Message,
   NotificationRecord,
@@ -29,6 +32,8 @@ export interface NewUser {
 
 export interface UserRepository {
   findById(id: string): Promise<User | null>;
+  /** Suspended accounts whose window elapsed — the scheduler restores them (E6-01). */
+  listSuspendedDue(now: Date, limit: number): Promise<User[]>;
   findByPhone(phone: string): Promise<User | null>;
   create(input: NewUser): Promise<User>;
   save(user: User): Promise<User>;
@@ -194,6 +199,35 @@ export interface MessageRepository {
   countUnread(conversationId: string, readerId: string): Promise<number>;
 }
 
+export interface NewReputationEvent {
+  userId: string;
+  kind: ReputationEventKind;
+  delta: number;
+  orderId: string | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface NewTradeRating {
+  reservationId: string;
+  raterId: string;
+  subjectId: string;
+  stars: number;
+  comment: string | null;
+}
+
+export interface ReputationRepository {
+  append(input: NewReputationEvent, at: Date): Promise<ReputationEvent>;
+  listByUser(
+    userId: string,
+    options: { since: Date | null; limit: number },
+  ): Promise<ReputationEvent[]>;
+  /** Ratings received by a user, newest first. */
+  listRatingsFor(userId: string, limit: number): Promise<TradeRating[]>;
+  findRating(reservationId: string, raterId: string): Promise<TradeRating | null>;
+  /** Null when the rater already rated this reservation (unique index). */
+  createRating(input: NewTradeRating, at: Date): Promise<TradeRating | null>;
+}
+
 export interface NewNotification {
   userId: string;
   channel: 'IN_APP' | 'SMS' | 'PUSH';
@@ -225,6 +259,20 @@ export interface NotificationEmitter {
     payload?: Record<string, unknown>;
   }): Promise<unknown>;
 }
+
+/** Trust events raised by the trade lifecycle (task E6-01). */
+export interface ReputationRecorder {
+  record(input: {
+    userId: string;
+    kind: ReputationEventKind;
+    orderId?: string | null;
+    metadata?: Record<string, unknown>;
+  }): Promise<unknown>;
+}
+
+export const NOOP_REPUTATION: ReputationRecorder = {
+  record: async () => undefined,
+};
 
 /** Used by services in tests and tooling where fan-out is irrelevant. */
 export const NOOP_NOTIFIER: NotificationEmitter = {
@@ -292,6 +340,7 @@ export interface IdGenerator {
 export interface Repositories {
   users: UserRepository;
   conversations: ConversationRepository;
+  reputation: ReputationRepository;
   messages: MessageRepository;
   notifications: NotificationRepository;
   otps: OtpRepository;

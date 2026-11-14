@@ -151,6 +151,16 @@ export const chatMessagesQuerySchema = z
 
 export type ChatMessagesQuery = z.infer<typeof chatMessagesQuerySchema>;
 
+/** Quick post-trade rating (task E6-03). Stars are mandatory, the note is optional. */
+export const ratingSchema = z
+  .object({
+    stars: z.number().int().min(1).max(5),
+    comment: z.string().trim().max(240).optional(),
+  })
+  .strict();
+
+export type RatingInput = z.infer<typeof ratingSchema>;
+
 export const notificationQuerySchema = z
   .object({
     unreadOnly: z
