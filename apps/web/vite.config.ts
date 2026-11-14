@@ -21,5 +21,20 @@ export default defineConfig({
       },
     },
   },
+  // `vite preview` serves the production build, which is the only place the service worker
+  // registers — so it needs the same same-origin API proxy as the dev server (E9-15).
+  preview: {
+    host: '0.0.0.0',
+    port: 5173,
+    strictPort: true,
+    allowedHosts: true,
+    proxy: {
+      '/v1': {
+        target: process.env['API_PROXY_TARGET'] ?? 'http://127.0.0.1:3000',
+        changeOrigin: true,
+        ws: true,
+      },
+    },
+  },
   build: { outDir: 'dist', sourcemap: true },
 });

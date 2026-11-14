@@ -9,7 +9,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "preview": "vite preview --host 0.0.0.0 --port 5173",
     "test": "vitest run",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "icons": "node scripts/pwa-icons.mjs"
   },
   "dependencies": {
     "@benzin/shared": "workspace:*",

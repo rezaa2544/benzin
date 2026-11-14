@@ -479,9 +479,18 @@ export interface RouteProvider {
   route(from: { lat: number; lng: number }, to: { lat: number; lng: number }): Promise<RouteResult>;
 }
 
-/** Outbound SMS port. Providers (Kavenegar/SMS.ir/…) are implemented in a later task. */
+/**
+ * Outbound SMS port.
+ *
+ * `send` carries free text (notifications, the admin test message). `sendCode` carries a one-time
+ * code on its own: providers with an approved template deliver it through their verify endpoint
+ * (cheaper, and it reaches numbers that block promotional SMS), the rest fall back to `send` with
+ * the configured OTP text. Keeping both on the port means a new provider cannot silently push
+ * codes into the free-text channel, and the auth flow never has to know which kind it got.
+ */
 export interface SmsSender {
   send(phone: string, message: string): Promise<void>;
+  sendCode(phone: string, code: string): Promise<void>;
 }
 
 export interface IdGenerator {

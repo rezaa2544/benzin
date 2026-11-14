@@ -25,7 +25,7 @@ export default tseslint.config(
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'module',
-      globals: { console: "readonly", process: "readonly", Buffer: "readonly", crypto: "readonly" },
+      globals: { console: 'readonly', process: 'readonly', Buffer: 'readonly', crypto: 'readonly' },
     },
     rules: {
       '@typescript-eslint/no-unused-vars': [
@@ -42,6 +42,22 @@ export default tseslint.config(
   {
     files: ['**/test/**/*.ts'],
     rules: { '@typescript-eslint/no-non-null-assertion': 'off' },
+  },
+  {
+    // The service worker is plain JS on purpose (no build step, no bundler): declare the worker
+    // globals it runs against instead of pulling a browser/types package into the app (E9-15).
+    files: ['apps/web/public/**/*.js'],
+    languageOptions: {
+      globals: {
+        self: 'readonly',
+        caches: 'readonly',
+        fetch: 'readonly',
+        Response: 'readonly',
+        Request: 'readonly',
+        URL: 'readonly',
+        addEventListener: 'readonly',
+      },
+    },
   },
   prettier,
 );
