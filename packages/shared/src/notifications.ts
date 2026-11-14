@@ -23,6 +23,9 @@ export const NOTIFICATION_KINDS = [
   'RATING_RECEIVED',
   'ACCOUNT_SUSPENDED',
   'ACCOUNT_RESTORED',
+  'PAYMENT_APPROVED',
+  'PAYMENT_FAILED',
+  'SUBSCRIPTION_EXPIRED',
 ] as const;
 
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
@@ -103,6 +106,21 @@ export const NOTIFICATION_TEMPLATES: Record<NotificationKind, NotificationTempla
     bodyFa:
       'امتیاز اعتبار شما به {score} رسید و حساب تا {hours} ساعت محدود شد. برای بررسی با پشتیبانی تماس بگیرید.',
     smsFa: 'حساب شما موقتاً تعلیق شد. بنزین',
+  },
+  PAYMENT_APPROVED: {
+    titleFa: 'پرداخت تأیید شد',
+    bodyFa: 'پرداخت {amount} تومان تأیید شد و اشتراک «{plan}» تا {endsAt} فعال است.',
+    smsFa: 'پرداخت شما تأیید شد. بنزین',
+  },
+  PAYMENT_FAILED: {
+    titleFa: 'پرداخت تأیید نشد',
+    bodyFa: 'پرداخت {amount} تومان تأیید نشد. در صورت کسر مبلغ با پشتیبانی تماس بگیرید.',
+    smsFa: null,
+  },
+  SUBSCRIPTION_EXPIRED: {
+    titleFa: 'اشتراک منقضی شد',
+    bodyFa: 'اشتراک «{plan}» شما به پایان رسید. برای ادامه، اشتراک را تمدید کنید.',
+    smsFa: null,
   },
   ACCOUNT_RESTORED: {
     titleFa: 'تعلیق حساب برداشته شد',

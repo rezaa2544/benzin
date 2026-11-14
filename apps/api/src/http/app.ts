@@ -6,16 +6,22 @@ import {
   AppError,
   cancelReservationSchema,
   chatMessagesQuerySchema,
+  confirmPaymentSchema,
+  createPaymentCardSchema,
   createOrderSchema,
   isAppError,
   marketStatsSchema,
   notificationQuerySchema,
   orderSearchSchema,
+  paymentListSchema,
+  purchaseSubscriptionSchema,
+  rejectPaymentSchema,
   originQuerySchema,
   paginationSchema,
   refreshTokenSchema,
   ratingSchema,
   requestOtpSchema,
+  gatewayCallbackSchema,
   sendMessageSchema,
   updateOrderSchema,
   verifyOtpSchema,
@@ -32,6 +38,12 @@ import { DistanceService } from '../modules/distance-service.js';
 import { LocationService, toZoneView } from '../modules/location-service.js';
 import { NotificationService } from '../modules/notification-service.js';
 import { OrderService } from '../modules/orders-service.js';
+import {
+  CardToCardProvider,
+  SandboxGatewayProvider,
+  ZarinpalGatewayProvider,
+} from '../modules/payment-providers.js';
+import { PaymentService } from '../modules/payment-service.js';
 import { ReputationService } from '../modules/reputation-service.js';
 import { ReservationService } from '../modules/reservations-service.js';
 import { SettingsService } from '../modules/settings-service.js';
@@ -82,6 +94,22 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   const locations = new LocationService(repos.zones);
   const distance = new DistanceService(routeProvider);
   const notifications = new NotificationService(repos, settings, sms, clock);
+  const gateway =
+    config.PAYMENT_GATEWAY === 'zarinpal' && config.ZARINPAL_MERCHANT_ID
+      ? new ZarinpalGatewayProvider({
+          merchantId: config.ZARINPAL_MERCHANT_ID,
+          callbackUrl: config.PAYMENT_CALLBACK_URL,
+          baseUrl: config.ZARINPAL_BASE_URL,
+        })
+      : new SandboxGatewayProvider();
+  const cardToCard = new CardToCardProvider(repos.paymentCards);
+  const payments = new PaymentService(
+    repos,
+    settings,
+    clock,
+    { gateway, cardToCard },
+    notifications,
+  );
   const reputation = new ReputationService(repos, settings, clock, notifications);
   const orders = new OrderService(repos, settings, clock, distance, locations, notifications);
   const reservations = new ReservationService(repos, settings, clock, notifications, reputation);
@@ -96,6 +124,7 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
     chat,
     notifications,
     orders,
+    payments,
     reputation,
     reservations,
     settings,
@@ -392,6 +421,35 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
     return chat.markRead(currentUser(request), id);
   });
 
+  // -------------------------------------------------------------- billing
+  app.get('/v1/plans', { preHandler: requireAuth }, async () => payments.listPlans());
+
+  app.get('/v1/me/subscription', { preHandler: requireAuth }, async (request) =>
+    payments.currentSubscription(currentUser(request)),
+  );
+
+  app.post('/v1/subscriptions', { preHandler: requireAuth }, async (request, reply) => {
+    const body = parseInput(purchaseSubscriptionSchema, request.body);
+    const started = await payments.startPurchase(currentUser(request), body);
+    return reply.status(201).send(started);
+  });
+
+  app.get('/v1/payments/mine', { preHandler: requireAuth }, async (request) => {
+    const query = parseInput(paginationSchema, request.query);
+    return payments.listMine(currentUser(request), query.limit);
+  });
+
+  app.get('/v1/payments/:id', { preHandler: requireAuth }, async (request) => {
+    const { id } = request.params as { id: string };
+    return payments.getPayment(currentUser(request), id);
+  });
+
+  app.post('/v1/payments/:id/gateway/callback', { preHandler: requireAuth }, async (request) => {
+    const { id } = request.params as { id: string };
+    const body = parseInput(gatewayCallbackSchema, request.body ?? {});
+    return payments.handleGatewayCallback(currentUser(request), id, body);
+  });
+
   // ---------------------------------------------------------- reputation
   app.get('/v1/me/reputation', { preHandler: requireAuth }, async (request) =>
     reputation.summary(currentUser(request).id),
@@ -446,6 +504,66 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
       if (!patch || typeof patch !== 'object') throw AppError.validation('Body must be an object');
       return { updated: await settings.update(user.id, patch) };
     },
+  );
+
+  app.get(
+    '/v1/admin/payments',
+    { preHandler: [requireAuth, requireRole('ADMIN', 'OWNER')] },
+    async (request) => {
+      const query = parseInput(paymentListSchema, request.query);
+      return payments.listAllPayments({ status: query.status ?? null, limit: query.limit });
+    },
+  );
+
+  app.post(
+    '/v1/admin/payments/:id/confirm',
+    { preHandler: [requireAuth, requireRole('ADMIN', 'OWNER')] },
+    async (request) => {
+      const { id } = request.params as { id: string };
+      const body = parseInput(confirmPaymentSchema, request.body ?? {});
+      return payments.confirmPayment(currentUser(request), id, body.reference ?? null);
+    },
+  );
+
+  app.post(
+    '/v1/admin/payments/:id/reject',
+    { preHandler: [requireAuth, requireRole('ADMIN', 'OWNER')] },
+    async (request) => {
+      const { id } = request.params as { id: string };
+      const body = parseInput(rejectPaymentSchema, request.body);
+      return payments.rejectPayment(currentUser(request), id, body.reason);
+    },
+  );
+
+  app.get(
+    '/v1/admin/payment-cards',
+    { preHandler: [requireAuth, requireRole('ADMIN', 'OWNER')] },
+    async () => payments.listPaymentCards(),
+  );
+
+  app.post(
+    '/v1/admin/payment-cards',
+    { preHandler: [requireAuth, requireRole('ADMIN', 'OWNER')] },
+    async (request, reply) => {
+      const body = parseInput(createPaymentCardSchema, request.body);
+      const card = await payments.addPaymentCard(currentUser(request), body);
+      return reply.status(201).send(card);
+    },
+  );
+
+  app.post(
+    '/v1/admin/payment-cards/:id/deactivate',
+    { preHandler: [requireAuth, requireRole('ADMIN', 'OWNER')] },
+    async (request) => {
+      const { id } = request.params as { id: string };
+      return payments.deactivatePaymentCard(currentUser(request), id);
+    },
+  );
+
+  app.post(
+    '/v1/admin/reconciliation',
+    { preHandler: [requireAuth, requireRole('ADMIN', 'OWNER')] },
+    async () => payments.reconcile(),
   );
 
   app.get(

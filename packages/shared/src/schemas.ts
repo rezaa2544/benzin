@@ -151,6 +151,59 @@ export const chatMessagesQuerySchema = z
 
 export type ChatMessagesQuery = z.infer<typeof chatMessagesQuerySchema>;
 
+/** Plan purchase. `method` picks the provider (E7-02). */
+export const purchaseSubscriptionSchema = z
+  .object({
+    planCode: z.string().trim().min(2).max(32),
+    method: z.enum(['CARD_TO_CARD', 'GATEWAY']).default('CARD_TO_CARD'),
+  })
+  .strict();
+
+export type PurchaseSubscriptionInput = z.infer<typeof purchaseSubscriptionSchema>;
+
+export const gatewayCallbackSchema = z
+  .object({
+    authority: z.string().trim().min(4).max(128).optional(),
+    reference: z.string().trim().min(1).max(128).optional(),
+  })
+  .strict();
+
+export type GatewayCallbackInput = z.infer<typeof gatewayCallbackSchema>;
+
+export const confirmPaymentSchema = z
+  .object({
+    reference: z.string().trim().min(1).max(128).optional(),
+  })
+  .strict();
+
+export const rejectPaymentSchema = z
+  .object({
+    reason: z.string().trim().min(3).max(240),
+  })
+  .strict();
+
+export const paymentListSchema = z
+  .object({
+    status: z.enum(['PENDING', 'PAID', 'FAILED', 'EXPIRED', 'NEEDS_REVIEW']).optional(),
+    limit: z.coerce.number().int().min(1).max(100).default(20),
+  })
+  .strict();
+
+export const createPaymentCardSchema = z
+  .object({
+    cardNumber: z
+      .string()
+      .trim()
+      .transform(toAsciiDigits)
+      .pipe(z.string().regex(/^\d{16}$/, { message: 'CARD_NUMBER_INVALID' })),
+    holderName: z.string().trim().min(2).max(80),
+    bankName: z.string().trim().min(2).max(40).optional(),
+    dailyLimit: z.number().int().positive().optional(),
+  })
+  .strict();
+
+export type CreatePaymentCardInput = z.infer<typeof createPaymentCardSchema>;
+
 /** Quick post-trade rating (task E6-03). Stars are mandatory, the note is optional. */
 export const ratingSchema = z
   .object({

@@ -56,6 +56,12 @@ export type MessageKind = (typeof MESSAGE_KINDS)[number];
 export const NOTIFICATION_CHANNELS = ['IN_APP', 'SMS', 'PUSH'] as const;
 export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
 
+export const SUBSCRIPTION_STATUSES = ['PENDING', 'ACTIVE', 'EXPIRED', 'CANCELLED'] as const;
+export type SubscriptionStatus = (typeof SUBSCRIPTION_STATUSES)[number];
+
+export const PAYMENT_METHODS = ['CARD_TO_CARD', 'GATEWAY'] as const;
+export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
+
 export const PAYMENT_PROVIDERS = ['CARD_TO_CARD', 'GATEWAY'] as const;
 export type PaymentProvider = (typeof PAYMENT_PROVIDERS)[number];
 

@@ -29,6 +29,12 @@ import type {
 } from '../../ports.js';
 import { ACTIVE_RESERVATION_STATUSES } from '@benzin/shared';
 import { MemoryConversationRepository, MemoryMessageRepository } from './chat.js';
+import {
+  MemoryPaymentCardRepository,
+  MemoryPaymentRepository,
+  MemoryPlanRepository,
+  MemorySubscriptionRepository,
+} from './billing.js';
 import { MemoryReputationRepository } from './reputation.js';
 import { MemoryNotificationRepository } from './notifications.js';
 import { MemoryZoneRepository } from './zones.js';
@@ -458,6 +464,10 @@ export function createMemoryRepositories(): Repositories {
     messages: new MemoryMessageRepository(),
     notifications: new MemoryNotificationRepository(),
     reputation: new MemoryReputationRepository(),
+    plans: new MemoryPlanRepository(),
+    subscriptions: new MemorySubscriptionRepository(),
+    payments: new MemoryPaymentRepository(),
+    paymentCards: new MemoryPaymentCardRepository(),
     otps: new MemoryOtpRepository(),
     refreshTokens: new MemoryRefreshTokenRepository(),
     devices: new MemoryDeviceRepository(),
