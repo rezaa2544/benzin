@@ -82,6 +82,20 @@ export const orderSearchSchema = z
 
 export type OrderSearchInput = z.infer<typeof orderSearchSchema>;
 
+/** Optional "where am I" pair. Both coordinates or neither — never just one. */
+export const originQuerySchema = z
+  .object({
+    lat: z.coerce.number().min(-90).max(90).optional(),
+    lng: z.coerce.number().min(-180).max(180).optional(),
+  })
+  .strict()
+  .refine((value) => (value.lat === undefined) === (value.lng === undefined), {
+    message: 'lat and lng must be sent together',
+    path: ['lng'],
+  });
+
+export type OriginQuery = z.infer<typeof originQuerySchema>;
+
 export const cancelReservationSchema = z
   .object({
     reason: z.enum(CANCEL_REASONS),

@@ -4,7 +4,7 @@ import { loadConfig } from '../src/config.js';
 import { createMemoryRepositories } from '../src/infra/memory/index.js';
 import { systemClock, type Clock } from '../src/domain/entities.js';
 import { BANEH_ZONE } from '../src/infra/db/seed.js';
-import type { Repositories, SmsSender } from '../src/ports.js';
+import type { Repositories, RouteProvider, SmsSender } from '../src/ports.js';
 import type { UserRole } from '@benzin/shared';
 import { signAccessToken } from '../src/modules/tokens.js';
 
@@ -44,7 +44,15 @@ export interface TestContext {
   close(): Promise<void>;
 }
 
-export async function createTestContext(clock: Clock = systemClock): Promise<TestContext> {
+export interface TestContextOptions {
+  /** Injected router; omit to exercise the straight-line fallback. */
+  routeProvider?: RouteProvider | null;
+}
+
+export async function createTestContext(
+  clock: Clock = systemClock,
+  options: TestContextOptions = {},
+): Promise<TestContext> {
   const repos = createMemoryRepositories();
   const sms = new CapturingSms();
   const { app } = await buildApp({
@@ -59,6 +67,7 @@ export async function createTestContext(clock: Clock = systemClock): Promise<Tes
     repos,
     sms,
     clock,
+    routeProvider: options.routeProvider ?? null,
   });
   // Every test context starts in the seeded coverage area (task E1-02).
   await repos.zones.upsert(BANEH_ZONE);
@@ -116,6 +125,7 @@ export const orderPayload = (overrides: Record<string, unknown> = {}) => ({
   rateToman: 2600,
   zoneId: ZONE_ID,
   stationName: 'پمپ بنزین میدان آزادی',
-  location: { lat: 35.6997, lng: 51.338 },
+  // Inside the seeded Baneh polygon; Tehran would now be rejected by ZONE_NOT_SUPPORTED.
+  location: { lat: 35.9983, lng: 45.8851 },
   ...overrides,
 });

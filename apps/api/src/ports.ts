@@ -166,6 +166,20 @@ export interface AuditRepository {
   list(limit: number): Promise<AuditEntry[]>;
 }
 
+/** Result of a drive between two points. */
+export interface RouteResult {
+  distanceMeters: number;
+  durationSeconds: number;
+}
+
+/**
+ * Outbound routing port (OSRM/Mapbox/…). A failing or slow provider must never
+ * break a response: DistanceService falls back to a straight-line estimate.
+ */
+export interface RouteProvider {
+  route(from: { lat: number; lng: number }, to: { lat: number; lng: number }): Promise<RouteResult>;
+}
+
 /** Outbound SMS port. Providers (Kavenegar/SMS.ir/…) are implemented in a later task. */
 export interface SmsSender {
   send(phone: string, message: string): Promise<void>;

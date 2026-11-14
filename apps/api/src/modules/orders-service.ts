@@ -6,8 +6,12 @@ import {
   type OrderStatus,
 } from '@benzin/shared';
 import type { Clock, Order, User } from '../domain/entities.js';
+import { publicLocation, type PublicLocation } from '../domain/geo.js';
 import { buyerSavingToman, isAboveOfficialRate, orderTotalToman } from '../domain/pricing.js';
 import type { Repositories } from '../ports.js';
+import type { DistanceService, RouteEstimate } from './distance-service.js';
+import { DistanceService as Distance } from './distance-service.js';
+import { LocationService } from './location-service.js';
 import type { SettingsService } from './settings-service.js';
 
 export interface OrderView {
@@ -23,10 +27,13 @@ export interface OrderView {
   status: OrderStatus;
   stationName: string | null;
   note: string | null;
-  location: { lat: number; lng: number } | null;
+  /** Never the exact point: snapped to the privacy grid (task E2-02). */
+  location: PublicLocation | null;
   deliveryMethod: Order['deliveryMethod'];
   expiresAt: string;
   createdAt: string;
+  /** Present only when the caller supplied an origin and the order has a point. */
+  distance?: RouteEstimate;
 }
 
 export function toOrderView(order: Order): OrderView {
@@ -43,7 +50,9 @@ export function toOrderView(order: Order): OrderView {
     status: order.status,
     stationName: order.stationName,
     note: order.note,
-    location: order.lat !== null && order.lng !== null ? { lat: order.lat, lng: order.lng } : null,
+    location: publicLocation(
+      order.lat !== null && order.lng !== null ? { lat: order.lat, lng: order.lng } : null,
+    ),
     deliveryMethod: order.deliveryMethod,
     expiresAt: order.expiresAt.toISOString(),
     createdAt: order.createdAt.toISOString(),
@@ -63,6 +72,8 @@ export class OrderService {
     private readonly repos: Pick<Repositories, 'orders' | 'audit' | 'zones'>,
     private readonly settings: SettingsService,
     private readonly clock: Clock,
+    private readonly distance: DistanceService = new Distance(null),
+    private readonly locations: LocationService = new LocationService(repos.zones),
   ) {}
 
   async create(user: User, input: CreateOrderInput): Promise<OrderView> {
@@ -80,11 +91,21 @@ export class OrderService {
         officialRateToman: TIER_RATE_TOMAN[input.tier],
       });
     }
-    const zone = await this.repos.zones.findById(input.zoneId);
+    // The zone is derived from the point, never trusted from the client (task E2-02).
+    let zoneId = input.zoneId;
+    if (input.location) {
+      const resolved = await this.locations.requireZone(input.location);
+      if (input.zoneId && input.zoneId !== resolved.id) {
+        throw new AppError('ZONE_MISMATCH', 422, 'Location is outside the selected zone', {
+          zoneId: input.zoneId,
+          resolvedZoneId: resolved.id,
+        });
+      }
+      zoneId = resolved.id;
+    }
+    const zone = await this.repos.zones.findById(zoneId);
     if (!zone || !zone.isActive) {
-      throw new AppError('ZONE_NOT_SUPPORTED', 422, 'Zone is not served yet', {
-        zoneId: input.zoneId,
-      });
+      throw new AppError('ZONE_NOT_SUPPORTED', 422, 'Zone is not served yet', { zoneId });
     }
 
     const openOrders = await this.repos.orders.countOpenByOwner(user.id, now);
@@ -100,7 +121,7 @@ export class OrderService {
       tier: input.tier,
       litres: input.litres,
       rateToman: input.rateToman,
-      zoneId: input.zoneId,
+      zoneId,
       stationName: input.stationName ?? null,
       note: input.note ?? null,
       lat: input.location?.lat ?? null,
@@ -149,10 +170,18 @@ export class OrderService {
     };
   }
 
-  async getById(id: string): Promise<OrderView> {
+  async getById(
+    id: string,
+    origin: { lat: number; lng: number } | null = null,
+  ): Promise<OrderView> {
     const order = await this.repos.orders.findById(id);
     if (!order) throw AppError.notFound('ORDER_NOT_AVAILABLE', 'Order not found');
-    return toOrderView(order);
+    const view = toOrderView(order);
+    if (origin && order.lat !== null && order.lng !== null) {
+      // Exact stored coordinates are used for the maths but never returned.
+      view.distance = await this.distance.estimate(origin, { lat: order.lat, lng: order.lng });
+    }
+    return view;
   }
 
   async listMine(user: User, limit = 20): Promise<OrderView[]> {
