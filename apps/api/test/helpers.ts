@@ -66,6 +66,11 @@ export interface TestContext {
 export interface TestContextOptions {
   /** Injected router; omit to exercise the straight-line fallback. */
   routeProvider?: RouteProvider | null;
+  /**
+   * Wraps the capturing sender the app receives. Lets a test simulate a provider outage while
+   * still reading the codes the capturing sender recorded.
+   */
+  wrapSms?: (inner: CapturingSms) => SmsSender;
 }
 
 export async function createTestContext(
@@ -74,6 +79,7 @@ export async function createTestContext(
 ): Promise<TestContext> {
   const repos = createMemoryRepositories();
   const sms = new CapturingSms();
+  const sender = options.wrapSms ? options.wrapSms(sms) : sms;
   const built = await buildApp({
     config: loadConfig({
       NODE_ENV: 'test',
@@ -84,7 +90,7 @@ export async function createTestContext(
       CORS_ORIGINS: 'http://localhost:5173',
     }),
     repos,
-    sms,
+    sms: sender,
     clock,
     routeProvider: options.routeProvider ?? null,
   });

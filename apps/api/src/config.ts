@@ -28,6 +28,28 @@ const envSchema = z.object({
         .map((origin) => origin.trim())
         .filter(Boolean),
     ),
+  /**
+   * SMS provider chain (decision D3): comma separated, first entry is primary, the rest are
+   * failover. `console` writes to the log so development and CI need no account.
+   */
+  SMS_PROVIDERS: z
+    .string()
+    .default('console')
+    .transform((value) =>
+      value
+        .split(',')
+        .map((name) => name.trim())
+        .filter(Boolean),
+    ),
+  /** SMS.ir (primary in D3). */
+  SMS_API_KEY: z.string().min(8).optional(),
+  SMS_SENDER_LINE: z.string().min(3).optional(),
+  SMS_IR_BASE_URL: z.string().url().default('https://api.sms.ir'),
+  /** Kavenegar (failover in D3). */
+  KAVENEGAR_API_KEY: z.string().min(8).optional(),
+  KAVENEGAR_SENDER_LINE: z.string().min(3).optional(),
+  KAVENEGAR_BASE_URL: z.string().url().default('https://api.kavenegar.com'),
+  SMS_TIMEOUT_MS: z.coerce.number().int().min(500).max(30_000).default(5_000),
   /** `sandbox` approves payments locally; `zarinpal` calls the real bank gateway. */
   PAYMENT_GATEWAY: z.enum(['sandbox', 'zarinpal']).default('sandbox'),
   ZARINPAL_MERCHANT_ID: z.string().min(8).optional(),
