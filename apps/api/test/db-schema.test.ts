@@ -50,6 +50,20 @@ describe('generated migrations', () => {
     expect(sql).toContain('"payments_unique_amount_idx"');
   });
 
+  // E3-01: the search index must match the query the API actually sends, otherwise Postgres
+  // silently falls back to a sequential scan. Leading columns follow the equality filters.
+  it('shapes the search index like the search query', () => {
+    const line = sql.split('\n').find((row) => row.includes('"orders_open_search_idx"'))!;
+    expect(line).toContain('("zone_id","side","tier","rate_toman","created_at")');
+    expect(line).toContain("WHERE status = 'OPEN'");
+  });
+
+  it('keeps an expiry index for the open-order sweep', () => {
+    const line = sql.split('\n').find((row) => row.includes('"orders_expiry_idx"'))!;
+    expect(line).toContain('("expires_at")');
+    expect(line).toContain("WHERE status = 'OPEN'");
+  });
+
   it('declares the PostGIS extension before the geography columns', () => {
     const extensionAt = sql.indexOf('CREATE EXTENSION IF NOT EXISTS "postgis"');
     const geographyAt = sql.indexOf('geography(');

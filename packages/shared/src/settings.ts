@@ -29,6 +29,7 @@ export const SETTING_DEFINITIONS = {
   'pricing.low_price_warning_percent': { schema: z.number().min(0).max(90), default: 30 },
   'dispute.auto_review_hours': { schema: z.number().int().min(1).max(168), default: 24 },
   'geo.default_radius_km': { schema: z.number().min(1).max(200), default: 15 },
+  'stats.window_days': { schema: z.number().int().min(1).max(365), default: 30 },
 } as const;
 
 export type SettingKey = keyof typeof SETTING_DEFINITIONS;

@@ -286,6 +286,26 @@ export class MemoryOrderRepository implements OrderRepository {
       .slice(0, limit)
       .map(clone);
   }
+
+  async update(
+    id: string,
+    patch: Partial<Pick<Order, 'litres' | 'rateToman' | 'stationName' | 'note'>>,
+    at: Date,
+  ): Promise<Order | null> {
+    const current = this.byId.get(id);
+    if (!current) return null;
+    const updated: Order = { ...current, ...patch, updatedAt: at };
+    this.byId.set(id, clone(updated));
+    return clone(updated);
+  }
+
+  async listSince(zoneId: string, since: Date, limit: number): Promise<Order[]> {
+    return [...this.byId.values()]
+      .filter((order) => order.zoneId === zoneId && order.createdAt.getTime() >= since.getTime())
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(0, limit)
+      .map(clone);
+  }
 }
 
 export class MemoryReservationRepository implements ReservationRepository {

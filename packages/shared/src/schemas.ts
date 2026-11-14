@@ -66,6 +66,31 @@ export const createOrderSchema = z
 
 export type CreateOrderInput = z.infer<typeof createOrderSchema>;
 
+/** Owner-side edit of an open order. Every field is optional, but at least one is required. */
+export const updateOrderSchema = z
+  .object({
+    litres: litresSchema.optional(),
+    rateToman: z.number().int().positive().optional(),
+    stationName: z.string().trim().min(2).max(80).nullable().optional(),
+    note: z.string().trim().max(240).nullable().optional(),
+  })
+  .strict()
+  .refine((value) => Object.keys(value).length > 0, {
+    message: 'At least one field must be provided',
+  });
+
+export type UpdateOrderInput = z.infer<typeof updateOrderSchema>;
+
+export const marketStatsSchema = z
+  .object({
+    zoneId: z.string().uuid(),
+    side: z.enum(ORDER_SIDES),
+    tier: z.enum(TIERS),
+  })
+  .strict();
+
+export type MarketStatsInput = z.infer<typeof marketStatsSchema>;
+
 export const orderSearchSchema = z
   .object({
     zoneId: z.string().uuid(),

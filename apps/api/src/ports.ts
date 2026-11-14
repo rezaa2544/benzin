@@ -117,6 +117,14 @@ export interface OrderRepository {
     patch?: Partial<Pick<Order, 'updatedAt'>>,
   ): Promise<Order | null>;
   listExpired(now: Date, limit: number): Promise<Order[]>;
+  /** Owner-side field edit that keeps the order in its current state (task E3-04). */
+  update(
+    id: string,
+    patch: Partial<Pick<Order, 'litres' | 'rateToman' | 'stationName' | 'note'>>,
+    at: Date,
+  ): Promise<Order | null>;
+  /** All orders of a zone created since `since`, newest first — input for market stats. */
+  listSince(zoneId: string, since: Date, limit: number): Promise<Order[]>;
 }
 
 export interface NewReservation {
