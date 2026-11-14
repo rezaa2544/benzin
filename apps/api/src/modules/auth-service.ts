@@ -79,15 +79,23 @@ export class AuthService {
       config['otp.length'],
       '0',
     );
-    await this.repos.otps.save({
+    const challenge = {
       phone,
       codeHash: this.hash(code, phone),
       expiresAt: new Date(now.getTime() + config['otp.ttl_seconds'] * 1000),
       attempts: 0,
       sentAt: now,
       consumedAt: null,
-    });
-    await this.sms.send(phone, `کد ورود شما به بنزین: ${code}`);
+    };
+    await this.repos.otps.save(challenge);
+    try {
+      await this.sms.send(phone, `کد ورود شما به بنزین: ${code}`);
+    } catch (error) {
+      // Nothing reached the user, so the code must not sit there burning the resend cooldown:
+      // marking it consumed retires it and lets the next request issue a fresh one immediately.
+      await this.repos.otps.save({ ...challenge, consumedAt: now });
+      throw error;
+    }
     return {
       expiresAt: new Date(now.getTime() + config['otp.ttl_seconds'] * 1000),
       cooldownSeconds: config['otp.resend_cooldown_seconds'],

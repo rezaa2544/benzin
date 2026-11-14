@@ -27,7 +27,6 @@ import type {
   Repositories,
   ReservationRepository,
   SettingsRepository,
-  SmsSender,
   UserRepository,
   UserSearchQuery,
 } from '../../ports.js';
@@ -559,15 +558,6 @@ export class MemoryProviderSettingsRepository implements ProviderSettingsReposit
     };
     this.byId.set(stored.id, clone(stored));
     return clone(stored);
-  }
-}
-
-/** Development SMS sender: writes to the log so the OTP is visible without an account. */
-export class ConsoleSmsSender implements SmsSender {
-  constructor(private readonly logger: (message: string) => void = (m) => console.info(m)) {}
-
-  async send(phone: string, message: string): Promise<void> {
-    this.logger(`[sms] → ${phone}: ${message}`);
   }
 }
 

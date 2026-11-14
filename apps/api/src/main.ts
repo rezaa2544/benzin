@@ -1,6 +1,7 @@
 import { buildApp } from './http/app.js';
 import { loadConfig } from './config.js';
-import { ConsoleSmsSender, createMemoryRepositories } from './infra/memory/index.js';
+import { createMemoryRepositories } from './infra/memory/index.js';
+import { createSmsSender } from './infra/sms/index.js';
 import { systemClock } from './domain/entities.js';
 import { applySeed } from './infra/db/seed.js';
 
@@ -19,12 +20,14 @@ if (config.NODE_ENV === 'production') {
 }
 
 const repos = createMemoryRepositories();
+// Provider chain from D3: SMS.ir first, Kavenegar as failover; `console` without keys.
+const sms = createSmsSender(config);
 // Development/tests only: make the app usable immediately (Baneh zone, plans, settings).
 await applySeed(repos);
 const { app } = await buildApp({
   config,
   repos,
-  sms: new ConsoleSmsSender(),
+  sms,
   clock: systemClock,
 });
 
