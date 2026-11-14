@@ -16,7 +16,7 @@ export interface NavItem {
 export const NAV_ITEMS: readonly NavItem[] = [
   { key: 'market', labelKey: 'nav.market', icon: 'market', href: '/market' },
   { key: 'search', labelKey: 'nav.search', icon: 'search', href: '/search' },
-  { key: 'create', labelKey: 'nav.create', icon: 'plus', href: '/orders/new', primary: true },
+  { key: 'create', labelKey: 'nav.create', icon: 'plus', href: '/new', primary: true },
   { key: 'orders', labelKey: 'nav.orders', icon: 'orders', href: '/orders' },
   { key: 'profile', labelKey: 'nav.profile', icon: 'profile', href: '/profile' },
 ];
