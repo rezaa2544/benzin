@@ -32,6 +32,7 @@ import {
   gatewayCallbackSchema,
   sendMessageSchema,
   updateOrderSchema,
+  updateProfileSchema,
   verifyOtpSchema,
   zoneLocateSchema,
   zoneUpsertSchema,
@@ -57,6 +58,7 @@ import { PaymentService } from '../modules/payment-service.js';
 import { ReputationService } from '../modules/reputation-service.js';
 import { ReservationService } from '../modules/reservations-service.js';
 import { SettingsService } from '../modules/settings-service.js';
+import { ProfileService } from '../modules/profile-service.js';
 import { StatsService } from '../modules/stats-service.js';
 import { attachChatSocket, type ChatSocketHandle } from './chat-socket.js';
 import { authenticate, currentUser, parseInput, type AppServices } from './context.js';
@@ -121,6 +123,7 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
     notifications,
   );
   const reputation = new ReputationService(repos, settings, clock, notifications);
+  const profile = new ProfileService(repos, reputation);
   const orders = new OrderService(repos, settings, clock, distance, locations, notifications);
   const reservations = new ReservationService(repos, settings, clock, notifications, reputation);
   // The socket hub is attached to the Fastify server below; the service publishes
@@ -143,6 +146,7 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
     reputation,
     reservations,
     settings,
+    profile,
     admin,
     stats,
   };
@@ -284,6 +288,18 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   app.get('/v1/me', { preHandler: requireAuth }, async (request) =>
     toPublicUser(currentUser(request)),
   );
+
+  /** Profile edit (task E1-05): only the display name, validated by the shared schema. */
+  app.patch('/v1/me', { preHandler: requireAuth }, async (request) => {
+    const body = parseInput(updateProfileSchema, request.body);
+    return toPublicUser(await profile.update(currentUser(request), body));
+  });
+
+  /** Public card for a counterpart: name, member-since and the trust level, never the phone. */
+  app.get('/v1/users/:id', { preHandler: requireAuth }, async (request) => {
+    const { id } = request.params as { id: string };
+    return profile.publicProfile(id);
+  });
 
   // --------------------------------------------------------------- zones
   app.get('/v1/zones', { preHandler: requireAuth }, async () => {

@@ -276,7 +276,18 @@ export function App(): JSX.Element {
       case 'notifications':
         return <NotificationsPage api={api} onUnreadChange={setUnread} />;
       case 'profile':
-        return <ProfilePage api={api} user={session.user} onLogout={logout} />;
+        return (
+          <ProfilePage
+            api={api}
+            user={session.user}
+            onUser={(user) => {
+              const next = { ...session, user };
+              writeSession(storeRef.current, next);
+              setSession(next);
+            }}
+            onLogout={logout}
+          />
+        );
       case 'plans':
         return <PlansPage api={api} />;
       case 'styleGuide':
