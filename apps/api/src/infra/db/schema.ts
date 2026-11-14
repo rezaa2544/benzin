@@ -92,6 +92,8 @@ export const users = pgTable(
     status: userStatus('status').notNull().default('ACTIVE'),
     walletBalance: bigint('wallet_balance', { mode: 'number' }).notNull().default(0),
     reputation: integer('reputation').notNull().default(0),
+    /** Trust suspension window (task E6-01); null when the account is unrestricted. */
+    suspendedUntil: timestamp('suspended_until', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
@@ -313,6 +315,30 @@ export const messages = pgTable(
     check('messages_kind_check', sql`${t.kind} IN ('TEXT', 'CONTACT', 'SYSTEM')`),
     uniqueIndex('messages_conversation_client_idx').on(t.conversationId, t.clientMessageId),
     index('messages_conversation_idx').on(t.conversationId, t.createdAt),
+  ],
+);
+
+export const tradeRatings = pgTable(
+  'trade_ratings',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    reservationId: uuid('reservation_id')
+      .notNull()
+      .references(() => reservations.id, { onDelete: 'cascade' }),
+    raterId: uuid('rater_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    subjectId: uuid('subject_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    stars: integer('stars').notNull(),
+    comment: text('comment'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check('trade_ratings_stars_check', sql`${t.stars} BETWEEN 1 AND 5`),
+    uniqueIndex('trade_ratings_one_per_rater_idx').on(t.reservationId, t.raterId),
+    index('trade_ratings_subject_idx').on(t.subjectId, t.createdAt),
   ],
 );
 

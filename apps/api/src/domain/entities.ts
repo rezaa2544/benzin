@@ -1,5 +1,6 @@
 import type {
   DeliveryMethod,
+  ReputationEventKind,
   MessageKind,
   NotificationChannel,
   NotificationKind,
@@ -17,6 +18,8 @@ export interface User {
   displayName: string | null;
   role: UserRole;
   status: UserStatus;
+  /** Set while a trust-score suspension is in force; cleared by the scheduler (E6-01). */
+  suspendedUntil: Date | null;
   readonly createdAt: Date;
 }
 
@@ -68,6 +71,28 @@ export interface Message {
   readonly body: string;
   readonly clientMessageId: string | null;
   readAt: Date | null;
+  readonly createdAt: Date;
+}
+
+/** Append-only trust event; the score is always derived from these rows. */
+export interface ReputationEvent {
+  readonly id: string;
+  readonly userId: string;
+  readonly kind: ReputationEventKind;
+  readonly delta: number;
+  readonly orderId: string | null;
+  readonly metadata: Record<string, unknown>;
+  readonly createdAt: Date;
+}
+
+/** One quick rating left by a trade party for the other (task E6-03). */
+export interface TradeRating {
+  readonly id: string;
+  readonly reservationId: string;
+  readonly raterId: string;
+  readonly subjectId: string;
+  readonly stars: number;
+  readonly comment: string | null;
   readonly createdAt: Date;
 }
 

@@ -14,6 +14,7 @@ import {
   originQuerySchema,
   paginationSchema,
   refreshTokenSchema,
+  ratingSchema,
   requestOtpSchema,
   sendMessageSchema,
   updateOrderSchema,
@@ -31,6 +32,7 @@ import { DistanceService } from '../modules/distance-service.js';
 import { LocationService, toZoneView } from '../modules/location-service.js';
 import { NotificationService } from '../modules/notification-service.js';
 import { OrderService } from '../modules/orders-service.js';
+import { ReputationService } from '../modules/reputation-service.js';
 import { ReservationService } from '../modules/reservations-service.js';
 import { SettingsService } from '../modules/settings-service.js';
 import { StatsService } from '../modules/stats-service.js';
@@ -80,15 +82,24 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   const locations = new LocationService(repos.zones);
   const distance = new DistanceService(routeProvider);
   const notifications = new NotificationService(repos, settings, sms, clock);
+  const reputation = new ReputationService(repos, settings, clock, notifications);
   const orders = new OrderService(repos, settings, clock, distance, locations, notifications);
-  const reservations = new ReservationService(repos, settings, clock, notifications);
+  const reservations = new ReservationService(repos, settings, clock, notifications, reputation);
   // The socket hub is attached to the Fastify server below; the service publishes
   // through this indirection so construction order stays acyclic.
   const events: ChatEventPublisher = { publish: (event) => hub.publisher.publish(event) };
   const hub: { publisher: ChatEventPublisher } = { publisher: NOOP_CHAT_EVENTS };
   const chat = new ChatService(repos, settings, clock, notifications, events);
   const stats = new StatsService(repos, settings, clock);
-  const services: AppServices = { auth, chat, notifications, orders, reservations, settings };
+  const services: AppServices = {
+    auth,
+    chat,
+    notifications,
+    orders,
+    reputation,
+    reservations,
+    settings,
+  };
   const requireAuth = authenticate(auth);
 
   const app = Fastify({
@@ -379,6 +390,23 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   app.post('/v1/conversations/:id/read', { preHandler: requireAuth }, async (request) => {
     const { id } = request.params as { id: string };
     return chat.markRead(currentUser(request), id);
+  });
+
+  // ---------------------------------------------------------- reputation
+  app.get('/v1/me/reputation', { preHandler: requireAuth }, async (request) =>
+    reputation.summary(currentUser(request).id),
+  );
+
+  app.get('/v1/users/:id/reputation', { preHandler: requireAuth }, async (request) => {
+    const { id } = request.params as { id: string };
+    return reputation.publicProfile(id);
+  });
+
+  app.post('/v1/reservations/:id/rating', { preHandler: requireAuth }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = parseInput(ratingSchema, request.body);
+    const rating = await reputation.rate(currentUser(request), id, body);
+    return reply.status(201).send(rating);
   });
 
   // ------------------------------------------------------- notifications

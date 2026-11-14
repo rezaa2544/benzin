@@ -87,6 +87,17 @@ describe('generated migrations', () => {
     expect(unreadIndex).toContain('WHERE read_at IS NULL');
   });
 
+  // E6-01/E6-03: suspensions are time-boxed, ratings are one-per-party-per-trade.
+  it('keeps the trust columns and the rating uniqueness', () => {
+    expect(sql).toContain('ALTER TABLE "users" ADD COLUMN "suspended_until"');
+    expect(sql).toContain('CREATE TABLE "trade_ratings"');
+    expect(sql).toContain('"trade_ratings_stars_check"');
+    expect(sql).toMatch(/CHECK \("trade_ratings"\."stars" BETWEEN 1 AND 5\)/);
+    expect(sql).toContain(
+      'CREATE UNIQUE INDEX "trade_ratings_one_per_rater_idx" ON "trade_ratings" USING btree ("reservation_id","rater_id")',
+    );
+  });
+
   it('declares the PostGIS extension before the geography columns', () => {
     const extensionAt = sql.indexOf('CREATE EXTENSION IF NOT EXISTS "postgis"');
     const geographyAt = sql.indexOf('geography(');

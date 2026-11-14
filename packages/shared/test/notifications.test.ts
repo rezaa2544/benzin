@@ -21,6 +21,9 @@ const REQUIRED_PARAMS: Record<string, Record<string, number | string>> = {
   ORDER_EXPIRED: { litres: 20 },
   CONTACT_SHARED: { by: 'صاحب سفارش' },
   CHAT_MESSAGE: { by: 'خریدار', litres: 20 },
+  RATING_RECEIVED: { stars: 5, score: 55 },
+  ACCOUNT_SUSPENDED: { score: 10, hours: 24 },
+  ACCOUNT_RESTORED: { score: 30 },
 };
 
 const placeholders = (template: string): string[] =>
