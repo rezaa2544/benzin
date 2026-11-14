@@ -7,11 +7,13 @@ import {
   cancelReservationSchema,
   createOrderSchema,
   isAppError,
+  marketStatsSchema,
   orderSearchSchema,
   originQuerySchema,
   paginationSchema,
   refreshTokenSchema,
   requestOtpSchema,
+  updateOrderSchema,
   verifyOtpSchema,
   zoneLocateSchema,
   fieldErrors,
@@ -25,6 +27,7 @@ import { LocationService, toZoneView } from '../modules/location-service.js';
 import { OrderService } from '../modules/orders-service.js';
 import { ReservationService } from '../modules/reservations-service.js';
 import { SettingsService } from '../modules/settings-service.js';
+import { StatsService } from '../modules/stats-service.js';
 import { authenticate, currentUser, parseInput, type AppServices } from './context.js';
 import { requireRole } from './roles.js';
 
@@ -69,6 +72,7 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   const distance = new DistanceService(routeProvider);
   const orders = new OrderService(repos, settings, clock, distance, locations);
   const reservations = new ReservationService(repos, settings, clock);
+  const stats = new StatsService(repos, settings, clock);
   const services: AppServices = { auth, orders, reservations, settings };
   const requireAuth = authenticate(auth);
 
@@ -240,9 +244,21 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
     );
   });
 
+  app.patch('/v1/orders/:id', { preHandler: requireAuth }, async (request) => {
+    const { id } = request.params as { id: string };
+    const body = parseInput(updateOrderSchema, request.body);
+    return orders.update(currentUser(request), id, body);
+  });
+
   app.post('/v1/orders/:id/cancel', { preHandler: requireAuth }, async (request) => {
     const { id } = request.params as { id: string };
     return orders.cancel(currentUser(request), id);
+  });
+
+  // ---------------------------------------------------------------- stats
+  app.get('/v1/stats/market', { preHandler: requireAuth }, async (request) => {
+    const query = parseInput(marketStatsSchema, request.query);
+    return stats.market(query);
   });
 
   // -------------------------------------------------------- reservations

@@ -4,6 +4,7 @@ import {
   type CreateOrderInput,
   type OrderSearchInput,
   type OrderStatus,
+  type UpdateOrderInput,
 } from '@benzin/shared';
 import type { Clock, Order, User } from '../domain/entities.js';
 import { publicLocation, type PublicLocation } from '../domain/geo.js';
@@ -209,6 +210,58 @@ export class OrderService {
       entity: 'order',
       entityId: id,
       metadata: { from: order.status },
+    });
+    return toOrderView(updated);
+  }
+
+  /**
+   * Edits an open order in place. Status never changes here, so the state machine stays
+   * untouched; a reserved order must be cancelled first (task E3-04).
+   */
+  async update(user: User, id: string, input: UpdateOrderInput): Promise<OrderView> {
+    const order = await this.repos.orders.findById(id);
+    if (!order) throw AppError.notFound('ORDER_NOT_AVAILABLE', 'Order not found');
+    if (order.ownerId !== user.id) {
+      throw AppError.forbidden('NOT_ORDER_OWNER', 'Only the owner can edit an order');
+    }
+    if (order.status !== 'OPEN') {
+      throw new AppError(
+        'INVALID_STATE_TRANSITION',
+        409,
+        `Cannot edit an order that is ${order.status}`,
+      );
+    }
+    const config = await this.settings.get();
+    const litres = input.litres ?? order.litres;
+    const rateToman = input.rateToman ?? order.rateToman;
+    if (litres < config['order.min_litres'] || litres > config['order.max_litres']) {
+      throw AppError.validation('Litres outside the allowed range', {
+        min: config['order.min_litres'],
+        max: config['order.max_litres'],
+      });
+    }
+    if (isAboveOfficialRate(order.tier, rateToman)) {
+      throw AppError.validation('Price cannot exceed the official rate for this tier', {
+        officialRateToman: TIER_RATE_TOMAN[order.tier],
+      });
+    }
+    const updated = await this.repos.orders.update(
+      id,
+      {
+        litres,
+        rateToman,
+        ...(input.stationName !== undefined ? { stationName: input.stationName } : {}),
+        ...(input.note !== undefined ? { note: input.note } : {}),
+      },
+      this.clock.now(),
+    );
+    if (!updated) throw AppError.notFound('ORDER_NOT_AVAILABLE', 'Order not found');
+    await this.repos.audit.append({
+      actorId: user.id,
+      action: 'order.updated',
+      entity: 'order',
+      entityId: id,
+      metadata: { litres, rateToman },
     });
     return toOrderView(updated);
   }

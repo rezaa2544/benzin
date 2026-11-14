@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import type { AppServices } from '../src/http/context.js';
 import { buildApp } from '../src/http/app.js';
 import { loadConfig } from '../src/config.js';
 import { createMemoryRepositories } from '../src/infra/memory/index.js';
@@ -20,6 +21,23 @@ export const testTokenConfig = {
 export const mintAccessToken = (user: { id: string; role: UserRole }): string =>
   signAccessToken({ sub: user.id, role: user.role }, testTokenConfig).token;
 
+/** Deterministic clock for expiry/queue tests: time only moves when the test says so. */
+export class ManualClock implements Clock {
+  constructor(private current: Date = new Date('2026-01-01T09:00:00.000Z')) {}
+
+  now(): Date {
+    return new Date(this.current);
+  }
+
+  advanceMinutes(minutes: number): void {
+    this.current = new Date(this.current.getTime() + minutes * 60_000);
+  }
+
+  advanceHours(hours: number): void {
+    this.current = new Date(this.current.getTime() + hours * 3_600_000);
+  }
+}
+
 export class CapturingSms implements SmsSender {
   readonly messages: { phone: string; message: string }[] = [];
 
@@ -38,6 +56,7 @@ export class CapturingSms implements SmsSender {
 
 export interface TestContext {
   app: FastifyInstance;
+  services: AppServices;
   repos: Repositories;
   sms: CapturingSms;
   clock: Clock;
@@ -55,7 +74,7 @@ export async function createTestContext(
 ): Promise<TestContext> {
   const repos = createMemoryRepositories();
   const sms = new CapturingSms();
-  const { app } = await buildApp({
+  const built = await buildApp({
     config: loadConfig({
       NODE_ENV: 'test',
       LOG_LEVEL: 'silent',
@@ -69,10 +88,11 @@ export async function createTestContext(
     clock,
     routeProvider: options.routeProvider ?? null,
   });
+  const app = built.app;
   // Every test context starts in the seeded coverage area (task E1-02).
   await repos.zones.upsert(BANEH_ZONE);
   await app.ready();
-  return { app, repos, sms, clock, close: () => app.close() };
+  return { app, services: built.services, repos, sms, clock, close: () => app.close() };
 }
 
 /** Registers a user through the real OTP flow and returns their bearer token. */
