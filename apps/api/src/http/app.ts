@@ -5,14 +5,17 @@ import { ZodError } from 'zod';
 import {
   AppError,
   cancelReservationSchema,
+  chatMessagesQuerySchema,
   createOrderSchema,
   isAppError,
   marketStatsSchema,
+  notificationQuerySchema,
   orderSearchSchema,
   originQuerySchema,
   paginationSchema,
   refreshTokenSchema,
   requestOtpSchema,
+  sendMessageSchema,
   updateOrderSchema,
   verifyOtpSchema,
   zoneLocateSchema,
@@ -20,14 +23,18 @@ import {
 } from '@benzin/shared';
 import type { Config } from '../config.js';
 import type { Clock, User } from '../domain/entities.js';
-import type { Repositories, RouteProvider, SmsSender } from '../ports.js';
+import type { ChatEventPublisher, Repositories, RouteProvider, SmsSender } from '../ports.js';
+import { NOOP_CHAT_EVENTS } from '../ports.js';
 import { AuthService } from '../modules/auth-service.js';
+import { ChatService } from '../modules/chat-service.js';
 import { DistanceService } from '../modules/distance-service.js';
 import { LocationService, toZoneView } from '../modules/location-service.js';
+import { NotificationService } from '../modules/notification-service.js';
 import { OrderService } from '../modules/orders-service.js';
 import { ReservationService } from '../modules/reservations-service.js';
 import { SettingsService } from '../modules/settings-service.js';
 import { StatsService } from '../modules/stats-service.js';
+import { attachChatSocket, type ChatSocketHandle } from './chat-socket.js';
 import { authenticate, currentUser, parseInput, type AppServices } from './context.js';
 import { requireRole } from './roles.js';
 
@@ -43,6 +50,8 @@ export interface BuildAppOptions {
 export interface BuiltApp {
   app: FastifyInstance;
   services: AppServices;
+  /** Realtime chat channel (E5-01); closed together with the HTTP server. */
+  chatSocket: ChatSocketHandle;
 }
 
 const toPublicUser = (user: User) => ({
@@ -70,10 +79,16 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   );
   const locations = new LocationService(repos.zones);
   const distance = new DistanceService(routeProvider);
-  const orders = new OrderService(repos, settings, clock, distance, locations);
-  const reservations = new ReservationService(repos, settings, clock);
+  const notifications = new NotificationService(repos, settings, sms, clock);
+  const orders = new OrderService(repos, settings, clock, distance, locations, notifications);
+  const reservations = new ReservationService(repos, settings, clock, notifications);
+  // The socket hub is attached to the Fastify server below; the service publishes
+  // through this indirection so construction order stays acyclic.
+  const events: ChatEventPublisher = { publish: (event) => hub.publisher.publish(event) };
+  const hub: { publisher: ChatEventPublisher } = { publisher: NOOP_CHAT_EVENTS };
+  const chat = new ChatService(repos, settings, clock, notifications, events);
   const stats = new StatsService(repos, settings, clock);
-  const services: AppServices = { auth, orders, reservations, settings };
+  const services: AppServices = { auth, chat, notifications, orders, reservations, settings };
   const requireAuth = authenticate(auth);
 
   const app = Fastify({
@@ -127,6 +142,12 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
     });
   });
 
+  const chatSocket = attachChatSocket(app, auth, chat);
+  hub.publisher = chatSocket.publisher;
+  app.addHook('onClose', async () => {
+    await chatSocket.close();
+  });
+
   app.get('/healthz', async () => ({ status: 'ok', uptimeSeconds: Math.round(process.uptime()) }));
 
   app.get('/v1/meta/config', async () => {
@@ -139,6 +160,8 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
       minLitres: effective['order.min_litres'],
       maxLitres: effective['order.max_litres'],
       maxActiveReservations: effective['reservation.max_active_per_user'],
+      maxMessageLength: effective['chat.max_message_length'],
+      quickReplies: effective['chat.quick_replies'],
     };
   });
 
@@ -312,6 +335,71 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
     return reservations.cancel(currentUser(request), id, body.reason);
   });
 
+  // ---------------------------------------------------------------- chat
+  app.get('/v1/chat/conversations', { preHandler: requireAuth }, async (request) => {
+    const query = parseInput(paginationSchema, request.query);
+    return chat.listMine(currentUser(request), query.limit);
+  });
+
+  app.get('/v1/chat/quick-replies', { preHandler: requireAuth }, async () => chat.quickReplies());
+
+  app.get('/v1/orders/:id/conversation', { preHandler: requireAuth }, async (request) => {
+    const { id } = request.params as { id: string };
+    return chat.openForOrder(currentUser(request), id);
+  });
+
+  app.get('/v1/conversations/:id', { preHandler: requireAuth }, async (request) => {
+    const { id } = request.params as { id: string };
+    return chat.get(currentUser(request), id);
+  });
+
+  app.get('/v1/conversations/:id/messages', { preHandler: requireAuth }, async (request) => {
+    const { id } = request.params as { id: string };
+    const query = parseInput(chatMessagesQuerySchema, request.query);
+    return chat.messages(currentUser(request), id, query);
+  });
+
+  app.post(
+    '/v1/conversations/:id/messages',
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const body = parseInput(sendMessageSchema, request.body);
+      const created = await chat.send(currentUser(request), id, body);
+      return reply.status(201).send(created);
+    },
+  );
+
+  app.post('/v1/conversations/:id/contact', { preHandler: requireAuth }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const created = await chat.shareContact(currentUser(request), id);
+    return reply.status(201).send(created);
+  });
+
+  app.post('/v1/conversations/:id/read', { preHandler: requireAuth }, async (request) => {
+    const { id } = request.params as { id: string };
+    return chat.markRead(currentUser(request), id);
+  });
+
+  // ------------------------------------------------------- notifications
+  app.get('/v1/notifications', { preHandler: requireAuth }, async (request) => {
+    const query = parseInput(notificationQuerySchema, request.query);
+    return notifications.list(currentUser(request), query);
+  });
+
+  app.get('/v1/notifications/unread-count', { preHandler: requireAuth }, async (request) =>
+    notifications.unreadCount(currentUser(request)),
+  );
+
+  app.post('/v1/notifications/read-all', { preHandler: requireAuth }, async (request) =>
+    notifications.markAllRead(currentUser(request)),
+  );
+
+  app.post('/v1/notifications/:id/read', { preHandler: requireAuth }, async (request) => {
+    const { id } = request.params as { id: string };
+    return notifications.markRead(currentUser(request), id);
+  });
+
   // ------------------------------------------------------------- admin
   app.get(
     '/v1/admin/settings',
@@ -341,5 +429,5 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
     },
   );
 
-  return { app, services };
+  return { app, services, chatSocket };
 }

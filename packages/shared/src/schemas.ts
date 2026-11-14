@@ -128,12 +128,40 @@ export const cancelReservationSchema = z
   })
   .strict();
 
+/**
+ * Chat message. The hard cap is 2000 characters; the effective limit comes from the
+ * runtime setting `chat.max_message_length` and is enforced by ChatService (task E5-01).
+ */
 export const sendMessageSchema = z
   .object({
-    body: z.string().trim().min(1).max(500),
+    body: z.string().trim().min(1).max(2000),
     clientMessageId: z.string().uuid().optional(),
   })
   .strict();
+
+export type SendMessageInput = z.infer<typeof sendMessageSchema>;
+
+/** Incremental read: everything strictly newer than `after` (an ISO timestamp). */
+export const chatMessagesQuerySchema = z
+  .object({
+    after: z.string().datetime({ offset: true }).optional(),
+    limit: z.coerce.number().int().min(1).max(100).default(50),
+  })
+  .strict();
+
+export type ChatMessagesQuery = z.infer<typeof chatMessagesQuerySchema>;
+
+export const notificationQuerySchema = z
+  .object({
+    unreadOnly: z
+      .enum(['true', 'false'])
+      .default('false')
+      .transform((value) => value === 'true'),
+    limit: z.coerce.number().int().min(1).max(50).default(20),
+  })
+  .strict();
+
+export type NotificationQuery = z.infer<typeof notificationQuerySchema>;
 
 export const zoneLocateSchema = z
   .object({

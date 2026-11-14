@@ -301,13 +301,16 @@ export const messages = pgTable(
     senderId: uuid('sender_id')
       .notNull()
       .references(() => users.id),
+    /** TEXT (free text), CONTACT (deliberate phone card) or SYSTEM (platform line). */
+    kind: text('kind').notNull().default('TEXT'),
     body: text('body').notNull(),
     clientMessageId: uuid('client_message_id'),
     readAt: timestamp('read_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    check('messages_body_length', sql`char_length(${t.body}) BETWEEN 1 AND 500`),
+    check('messages_body_length', sql`char_length(${t.body}) BETWEEN 1 AND 2000`),
+    check('messages_kind_check', sql`${t.kind} IN ('TEXT', 'CONTACT', 'SYSTEM')`),
     uniqueIndex('messages_conversation_client_idx').on(t.conversationId, t.clientMessageId),
     index('messages_conversation_idx').on(t.conversationId, t.createdAt),
   ],
@@ -446,6 +449,8 @@ export const notifications = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     channel: notificationChannel('channel').notNull().default('IN_APP'),
+    /** Template key from packages/shared/src/notifications.ts. */
+    kind: text('kind').notNull().default('SYSTEM'),
     titleFa: text('title_fa').notNull(),
     bodyFa: text('body_fa').notNull(),
     payload: jsonb('payload').notNull().default({}),

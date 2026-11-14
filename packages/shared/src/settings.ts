@@ -17,6 +17,7 @@ export const SETTING_DEFINITIONS = {
   'order.rate_ceiling_tolerance_percent': { schema: z.number().min(0).max(100), default: 20 },
   'trade.auto_complete_hours': { schema: z.number().int().min(1).max(72), default: 2 },
   'chat.max_message_length': { schema: z.number().int().min(20).max(2000), default: 500 },
+  'notification.sms_enabled': { schema: z.boolean(), default: true },
   'chat.quick_replies': {
     schema: z.array(z.string().min(1).max(120)).min(1).max(12),
     default: ['سلام، در مسیرم', '۵ دقیقه دیگر می‌رسم', 'پمپ شلوغ است', 'کارت را آماده کنید'],
