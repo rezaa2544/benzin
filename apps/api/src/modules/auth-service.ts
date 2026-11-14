@@ -2,6 +2,7 @@ import { randomInt } from 'node:crypto';
 import { AppError, type UserRole } from '@benzin/shared';
 import type { Clock, User } from '../domain/entities.js';
 import type { Repositories, SmsSender } from '../ports.js';
+import { KeyedLock } from './keyed-lock.js';
 import type { SettingsService } from './settings-service.js';
 import {
   createRefreshToken,
@@ -36,6 +37,11 @@ export interface AuthSession {
 }
 
 export class AuthService {
+  /** Cooldown, attempt cap and code consumption are all read-then-write (E1-07). */
+  private readonly otpLock = new KeyedLock();
+  /** One refresh token must rotate exactly once, however many callers race (E1-07). */
+  private readonly refreshLock = new KeyedLock();
+
   constructor(
     private readonly repos: Repositories,
     private readonly settings: SettingsService,
@@ -51,6 +57,11 @@ export class AuthService {
 
   /** Issues a one-time code. Cooldown and TTL are runtime settings, not constants. */
   async requestOtp(phone: string): Promise<{ expiresAt: Date; cooldownSeconds: number }> {
+    // Serialised per phone: a burst of requests must produce one SMS, not one per request.
+    return this.otpLock.run(`otp:${phone}`, () => this.issueOtp(phone));
+  }
+
+  private async issueOtp(phone: string): Promise<{ expiresAt: Date; cooldownSeconds: number }> {
     const config = await this.settings.get();
     const now = this.clock.now();
     const existing = await this.repos.otps.findLatest(phone);
@@ -84,6 +95,12 @@ export class AuthService {
   }
 
   async verifyOtp(phone: string, code: string, device?: DeviceInput): Promise<AuthSession> {
+    // Same key as issueOtp: a parallel burst cannot spend more than max_attempts guesses, and a
+    // correct code can only be consumed once.
+    return this.otpLock.run(`otp:${phone}`, () => this.checkOtp(phone, code, device));
+  }
+
+  private async checkOtp(phone: string, code: string, device?: DeviceInput): Promise<AuthSession> {
     const config = await this.settings.get();
     const now = this.clock.now();
     const challenge = await this.repos.otps.findLatest(phone);
@@ -167,6 +184,14 @@ export class AuthService {
    * the whole family is revoked so neither the attacker nor the legitimate client can continue.
    */
   async refresh(rawToken: string): Promise<AuthSession> {
+    const stored = await this.repos.refreshTokens.findByHash(sha256(rawToken));
+    if (!stored) throw new AppError('REFRESH_TOKEN_INVALID', 401, 'Unknown refresh token');
+    // Serialised per family, then re-read: the loser of a race sees the rotation and is treated as
+    // a replayed token instead of forking the family into two live chains.
+    return this.refreshLock.run(`family:${stored.familyId}`, () => this.rotateRefresh(rawToken));
+  }
+
+  private async rotateRefresh(rawToken: string): Promise<AuthSession> {
     const now = this.clock.now();
     const stored = await this.repos.refreshTokens.findByHash(sha256(rawToken));
     if (!stored) throw new AppError('REFRESH_TOKEN_INVALID', 401, 'Unknown refresh token');

@@ -9,6 +9,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "load:smoke": "tsx scripts/load-smoke.ts",
     "lint": "eslint .",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/infra/db/cli.ts migrate",

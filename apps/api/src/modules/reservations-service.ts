@@ -14,6 +14,7 @@ import {
   type ReputationRecorder,
   type Repositories,
 } from '../ports.js';
+import { KeyedLock } from './keyed-lock.js';
 import type { SettingsService } from './settings-service.js';
 
 export interface ReservationView {
@@ -41,6 +42,9 @@ export const toReservationView = (reservation: Reservation): ReservationView => 
 });
 
 export class ReservationService {
+  /** One taker must not reserve twice at the same instant (E1-07). */
+  private readonly takerLock = new KeyedLock();
+
   constructor(
     private readonly repos: Pick<
       Repositories,
@@ -93,47 +97,49 @@ export class ReservationService {
       }
     }
 
-    const active = await this.repos.reservations.findActiveByTaker(taker.id);
-    if (active.length >= config['reservation.max_active_per_user']) {
-      throw new AppError(
-        'RESERVATION_LIMIT_REACHED',
-        429,
-        'You already have an active reservation',
-        {
-          limit: config['reservation.max_active_per_user'],
-        },
+    return this.takerLock.run(`taker:${taker.id}`, async () => {
+      const active = await this.repos.reservations.findActiveByTaker(taker.id);
+      if (active.length >= config['reservation.max_active_per_user']) {
+        throw new AppError(
+          'RESERVATION_LIMIT_REACHED',
+          429,
+          'You already have an active reservation',
+          {
+            limit: config['reservation.max_active_per_user'],
+          },
+        );
+      }
+
+      const reserved = await this.repos.orders.transition(orderId, 'OPEN', 'RESERVED');
+      if (!reserved) throw new AppError('ORDER_NOT_AVAILABLE', 409, 'Order is no longer available');
+
+      const reservation = await this.repos.reservations.createExclusive({
+        id: crypto.randomUUID(),
+        orderId,
+        takerId: taker.id,
+        expiresAt: new Date(now.getTime() + config['owner.decision_ttl_minutes'] * 60_000),
+      });
+
+      if (!reservation) {
+        await this.repos.orders.transition(orderId, 'RESERVED', 'OPEN');
+        throw new AppError('ORDER_NOT_AVAILABLE', 409, 'Order is no longer available');
+      }
+
+      await this.repos.audit.append({
+        actorId: taker.id,
+        action: 'reservation.requested',
+        entity: 'reservation',
+        entityId: reservation.id,
+        metadata: { orderId },
+      });
+      await this.notify(
+        order.ownerId,
+        'RESERVATION_REQUESTED',
+        { litres: order.litres, minutes: config['owner.decision_ttl_minutes'] },
+        { orderId, reservationId: reservation.id },
       );
-    }
-
-    const reserved = await this.repos.orders.transition(orderId, 'OPEN', 'RESERVED');
-    if (!reserved) throw new AppError('ORDER_NOT_AVAILABLE', 409, 'Order is no longer available');
-
-    const reservation = await this.repos.reservations.createExclusive({
-      id: crypto.randomUUID(),
-      orderId,
-      takerId: taker.id,
-      expiresAt: new Date(now.getTime() + config['owner.decision_ttl_minutes'] * 60_000),
+      return toReservationView(reservation);
     });
-
-    if (!reservation) {
-      await this.repos.orders.transition(orderId, 'RESERVED', 'OPEN');
-      throw new AppError('ORDER_NOT_AVAILABLE', 409, 'Order is no longer available');
-    }
-
-    await this.repos.audit.append({
-      actorId: taker.id,
-      action: 'reservation.requested',
-      entity: 'reservation',
-      entityId: reservation.id,
-      metadata: { orderId },
-    });
-    await this.notify(
-      order.ownerId,
-      'RESERVATION_REQUESTED',
-      { litres: order.litres, minutes: config['owner.decision_ttl_minutes'] },
-      { orderId, reservationId: reservation.id },
-    );
-    return toReservationView(reservation);
   }
 
   async get(user: User, id: string): Promise<ReservationView> {

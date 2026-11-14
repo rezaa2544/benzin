@@ -13,6 +13,7 @@ import type { NotificationEmitter, Repositories } from '../ports.js';
 import type { DistanceService, RouteEstimate } from './distance-service.js';
 import { DistanceService as Distance } from './distance-service.js';
 import { LocationService } from './location-service.js';
+import { KeyedLock } from './keyed-lock.js';
 import type { SettingsService } from './settings-service.js';
 
 export interface OrderView {
@@ -69,6 +70,9 @@ const decodeCursor = (cursor: string | undefined): number => {
 };
 
 export class OrderService {
+  /** Serialises the "how many open orders do I already have" check against the insert (E1-07). */
+  private readonly ownerLock = new KeyedLock();
+
   constructor(
     private readonly repos: Pick<
       Repositories,
@@ -113,56 +117,58 @@ export class OrderService {
       throw new AppError('ZONE_NOT_SUPPORTED', 422, 'Zone is not served yet', { zoneId });
     }
 
-    // E4-06: one trade cycle at a time — an active reservation blocks new listings.
-    const activeTrades = await this.repos.reservations.findActiveByTaker(user.id);
-    if (activeTrades.length > 0) {
-      throw new AppError('TRADE_CYCLE_BLOCKED', 409, 'Finish your active trade first', {
-        reservationId: activeTrades[0]!.id,
+    return this.ownerLock.run(`owner:${user.id}`, async () => {
+      // E4-06: one trade cycle at a time — an active reservation blocks new listings.
+      const activeTrades = await this.repos.reservations.findActiveByTaker(user.id);
+      if (activeTrades.length > 0) {
+        throw new AppError('TRADE_CYCLE_BLOCKED', 409, 'Finish your active trade first', {
+          reservationId: activeTrades[0]!.id,
+        });
+      }
+
+      // Plans widen the open-order allowance; the paid gate itself is off by default (A23).
+      const subscription = await this.repos.subscriptions.findActiveByUser(user.id, now);
+      if (!subscription && config['subscription.required_for_orders']) {
+        throw new AppError('SUBSCRIPTION_REQUIRED', 403, 'An active subscription is required');
+      }
+      const plan = subscription ? await this.repos.plans.findById(subscription.planId) : null;
+      const openLimit = Math.max(config['order.max_open_per_user'], plan?.maxActiveOrders ?? 0);
+      const openOrders = await this.repos.orders.countOpenByOwner(user.id, now);
+      if (openOrders >= openLimit) {
+        throw new AppError('ORDER_LIMIT_REACHED', 429, 'Too many open orders', {
+          limit: openLimit,
+        });
+      }
+
+      const order = await this.repos.orders.create({
+        ownerId: user.id,
+        side: input.side,
+        tier: input.tier,
+        litres: input.litres,
+        rateToman: input.rateToman,
+        zoneId,
+        stationName: input.stationName ?? null,
+        note: input.note ?? null,
+        lat: input.location?.lat ?? null,
+        lng: input.location?.lng ?? null,
+        deliveryMethod: input.deliveryMethod,
+        expiresAt: new Date(now.getTime() + config['order.default_expiry_hours'] * 3_600_000),
       });
-    }
 
-    // Plans widen the open-order allowance; the paid gate itself is off by default (A23).
-    const subscription = await this.repos.subscriptions.findActiveByUser(user.id, now);
-    if (!subscription && config['subscription.required_for_orders']) {
-      throw new AppError('SUBSCRIPTION_REQUIRED', 403, 'An active subscription is required');
-    }
-    const plan = subscription ? await this.repos.plans.findById(subscription.planId) : null;
-    const openLimit = Math.max(config['order.max_open_per_user'], plan?.maxActiveOrders ?? 0);
-    const openOrders = await this.repos.orders.countOpenByOwner(user.id, now);
-    if (openOrders >= openLimit) {
-      throw new AppError('ORDER_LIMIT_REACHED', 429, 'Too many open orders', {
-        limit: openLimit,
+      await this.repos.audit.append({
+        actorId: user.id,
+        action: 'order.created',
+        entity: 'order',
+        entityId: order.id,
+        metadata: {
+          side: order.side,
+          tier: order.tier,
+          litres: order.litres,
+          rateToman: order.rateToman,
+        },
       });
-    }
-
-    const order = await this.repos.orders.create({
-      ownerId: user.id,
-      side: input.side,
-      tier: input.tier,
-      litres: input.litres,
-      rateToman: input.rateToman,
-      zoneId,
-      stationName: input.stationName ?? null,
-      note: input.note ?? null,
-      lat: input.location?.lat ?? null,
-      lng: input.location?.lng ?? null,
-      deliveryMethod: input.deliveryMethod,
-      expiresAt: new Date(now.getTime() + config['order.default_expiry_hours'] * 3_600_000),
+      return toOrderView(order);
     });
-
-    await this.repos.audit.append({
-      actorId: user.id,
-      action: 'order.created',
-      entity: 'order',
-      entityId: order.id,
-      metadata: {
-        side: order.side,
-        tier: order.tier,
-        litres: order.litres,
-        rateToman: order.rateToman,
-      },
-    });
-    return toOrderView(order);
   }
 
   async search(
