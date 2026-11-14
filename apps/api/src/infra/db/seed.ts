@@ -75,10 +75,45 @@ export const SEED_PAYMENT_CARD = {
   dailyLimit: null,
 } as const;
 
+/**
+ * Out-of-the-box provider rows so the SMS panel (task E8-06) and the status screen have
+ * something real to show: the console SMS sender and the sandbox gateway.
+ */
+export const SEED_PROVIDERS: readonly {
+  provider: string;
+  kind: 'SMS' | 'PAYMENT' | 'MAP';
+  isActive: boolean;
+  config: Record<string, unknown>;
+}[] = [
+  { provider: 'console', kind: 'SMS', isActive: true, config: { sender: 'BENZIN' } },
+  { provider: 'sandbox', kind: 'PAYMENT', isActive: true, config: {} },
+  { provider: 'zarinpal', kind: 'PAYMENT', isActive: false, config: { merchantId: '' } },
+  {
+    provider: 'osrm',
+    kind: 'MAP',
+    isActive: false,
+    config: { baseUrl: 'https://router.project-osrm.org' },
+  },
+];
+
 export async function applySeed(
-  repos: Pick<Repositories, 'zones' | 'settings' | 'plans' | 'paymentCards'>,
+  repos: Pick<Repositories, 'zones' | 'settings' | 'plans' | 'paymentCards' | 'providerSettings'>,
 ): Promise<void> {
   for (const zone of SEED_ZONES) await repos.zones.upsert(zone);
+  for (const provider of SEED_PROVIDERS) {
+    const existing = await repos.providerSettings.findBy(provider.kind, provider.provider);
+    if (existing) continue;
+    await repos.providerSettings.upsert(
+      {
+        provider: provider.provider,
+        kind: provider.kind,
+        isActive: provider.isActive,
+        config: provider.config,
+        updatedBy: null,
+      },
+      new Date(),
+    );
+  }
   for (const [key, value] of Object.entries(SEED_SETTINGS)) {
     await repos.settings.set(key, value, null);
   }

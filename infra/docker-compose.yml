@@ -51,6 +51,15 @@ services:
       redis:
         condition: service_healthy
 
+  admin:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.admin
+    ports:
+      - '${ADMIN_PORT:-4173}:4173'
+    depends_on:
+      - api
+
   caddy:
     image: caddy:2-alpine
     ports:
@@ -61,6 +70,7 @@ services:
       - caddydata:/data
     depends_on:
       - api
+      - admin
 
 volumes:
   pgdata:

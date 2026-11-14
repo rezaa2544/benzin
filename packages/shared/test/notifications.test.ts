@@ -27,6 +27,8 @@ const REQUIRED_PARAMS: Record<string, Record<string, number | string>> = {
   PAYMENT_APPROVED: { amount: 49_000, plan: 'اشتراک یک‌ماهه', endsAt: '۱۴۰۴ آبان ۲۲' },
   PAYMENT_FAILED: { amount: 49_000 },
   SUBSCRIPTION_EXPIRED: { plan: 'اشتراک یک‌ماهه' },
+  DISPUTE_RESOLVED: { litres: 20, outcome: 'به نفع خریدار' },
+  ACCOUNT_ROLE_CHANGED: { role: 'پشتیبانی' },
 };
 
 const placeholders = (template: string): string[] =>

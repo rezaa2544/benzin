@@ -1,0 +1,75 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Design tokens (task E8-01). Vazirmatn is self-hosted in production; the panel falls
+ * back to the system stack here because no font binary is committed (ASSUMPTION A26).
+ * Every spacing/side rule uses logical properties so RTL never needs a second stylesheet.
+ */
+:root {
+  --ink: 17 24 39;
+  --muted: 107 114 128;
+  --surface: 246 247 249;
+  --raised: 255 255 255;
+  --line: 226 232 240;
+  --brand: 16 122 87;
+  --brand-ink: 255 255 255;
+  --success: 21 128 61;
+  --warning: 180 83 9;
+  --danger: 185 28 28;
+}
+
+@layer base {
+  html {
+    font-family: Vazirmatn, IRANSans, system-ui, 'Segoe UI', Tahoma, sans-serif;
+  }
+
+  body {
+    @apply bg-surface text-ink antialiased;
+    margin: 0;
+  }
+
+  /* Numbers inside tables and forms read left-to-right even in an RTL page. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-xl2 border border-line bg-raised p-4 shadow-sm;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-line bg-raised px-3 py-2 text-sm font-medium transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply border-transparent bg-brand text-brandInk hover:opacity-90;
+  }
+
+  .btn-danger {
+    @apply border-transparent bg-danger text-white hover:opacity-90;
+  }
+
+  .input {
+    @apply w-full rounded-lg border border-line bg-raised px-3 py-2 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/20;
+  }
+
+  .label {
+    @apply mb-1 block text-xs font-medium text-muted;
+  }
+
+  .table {
+    @apply w-full border-collapse text-sm;
+  }
+
+  .table th {
+    @apply border-b border-line bg-surface px-3 py-2 text-start text-xs font-semibold text-muted;
+  }
+
+  .table td {
+    @apply border-b border-line px-3 py-2 align-middle;
+  }
+}

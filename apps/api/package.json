@@ -15,7 +15,8 @@
     "db:studio": "drizzle-kit studio",
     "db:seed": "tsx src/infra/db/cli.ts seed",
     "db:reset": "tsx src/infra/db/cli.ts reset",
-    "db:status": "tsx src/infra/db/cli.ts status"
+    "db:status": "tsx src/infra/db/cli.ts status",
+    "owner:create": "tsx src/cli/create-owner.ts"
   },
   "dependencies": {
     "@benzin/shared": "workspace:*",

@@ -90,6 +90,22 @@ export class PgZoneRepository implements ZoneRepository {
     return (rows as Row[]).map(toRecord);
   }
 
+  async listAll(): Promise<ZoneRecord[]> {
+    const rows = await this.db
+      .select({
+        id: zones.id,
+        slug: zones.slug,
+        nameFa: zones.nameFa,
+        city: zones.city,
+        province: zones.province,
+        isActive: zones.isActive,
+        boundaryGeo: sql<string>`ST_AsGeoJSON(${zones.boundary})`,
+      })
+      .from(zones)
+      .orderBy(zones.nameFa);
+    return (rows as Row[]).map(toRecord);
+  }
+
   async upsert(zone: ZoneRecord): Promise<ZoneRecord> {
     const wkt = `SRID=4326;POLYGON((${zone.boundary
       .map(([lng, lat]) => `${lng} ${lat}`)

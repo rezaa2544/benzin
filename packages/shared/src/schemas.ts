@@ -1,5 +1,14 @@
 import { z } from 'zod';
-import { CANCEL_REASONS, DELIVERY_METHODS, ORDER_SIDES, TIERS } from './enums.js';
+import {
+  CANCEL_REASONS,
+  DELIVERY_METHODS,
+  ORDER_SIDES,
+  ORDER_STATUSES,
+  SUBSCRIPTION_STATUSES,
+  TIERS,
+  USER_ROLES,
+  USER_STATUSES,
+} from './enums.js';
 import { toAsciiDigits } from './format.js';
 
 /** Iranian mobile number, normalised to 09XXXXXXXXX. Accepts Persian digits, +98 and 0098. */
@@ -251,3 +260,145 @@ export function fieldErrors(error: z.ZodError): Record<string, string> {
   }
   return result;
 }
+
+// ------------------------------------------------------------------ admin (E8)
+
+const adminPaging = {
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  offset: z.coerce.number().int().min(0).max(10_000).default(0),
+};
+
+export const adminUserQuerySchema = z
+  .object({
+    q: z.string().trim().max(64).optional(),
+    role: z.enum(USER_ROLES).optional(),
+    status: z.enum(USER_STATUSES).optional(),
+    ...adminPaging,
+  })
+  .strict();
+
+export type AdminUserQuery = z.infer<typeof adminUserQuerySchema>;
+
+/** Role changes, profile edits and manual suspensions, all audited (task E8-02). */
+export const adminUpdateUserSchema = z
+  .object({
+    role: z.enum(USER_ROLES).optional(),
+    displayName: z.string().trim().min(2).max(60).nullable().optional(),
+    status: z.enum(USER_STATUSES).optional(),
+    suspendHours: z.number().int().min(1).max(720).optional(),
+    reason: z.string().trim().min(3).max(240).optional(),
+  })
+  .strict()
+  .refine((value) => value.status !== 'SUSPENDED' || value.suspendHours !== undefined, {
+    message: 'SUSPEND_HOURS_REQUIRED',
+    path: ['suspendHours'],
+  });
+
+export type AdminUpdateUserInput = z.infer<typeof adminUpdateUserSchema>;
+
+export const adminOrderQuerySchema = z
+  .object({
+    status: z.enum(ORDER_STATUSES).optional(),
+    zoneId: z.string().uuid().optional(),
+    side: z.enum(ORDER_SIDES).optional(),
+    q: z.string().trim().max(64).optional(),
+    ...adminPaging,
+  })
+  .strict();
+
+export type AdminOrderQuery = z.infer<typeof adminOrderQuerySchema>;
+
+/** Only an admin closes a disputed trade (E4-04 / E8-03). */
+export const adminResolveDisputeSchema = z
+  .object({
+    outcome: z.enum(['COMPLETE', 'CANCEL']),
+    note: z.string().trim().min(3).max(240),
+  })
+  .strict();
+
+export type AdminResolveDisputeInput = z.infer<typeof adminResolveDisputeSchema>;
+
+export const adminSubscriptionQuerySchema = z
+  .object({
+    status: z.enum(SUBSCRIPTION_STATUSES).optional(),
+    ...adminPaging,
+  })
+  .strict();
+
+export type AdminSubscriptionQuery = z.infer<typeof adminSubscriptionQuerySchema>;
+
+export const adminAuditQuerySchema = z
+  .object({
+    action: z.string().trim().max(64).optional(),
+    actorId: z.string().uuid().optional(),
+    entity: z
+      .enum([
+        'user',
+        'order',
+        'reservation',
+        'payment',
+        'subscription',
+        'zone',
+        'provider',
+        'settings',
+      ])
+      .optional(),
+    limit: z.coerce.number().int().min(1).max(200).default(50),
+    offset: z.coerce.number().int().min(0).max(20_000).default(0),
+  })
+  .strict();
+
+export type AdminAuditQuery = z.infer<typeof adminAuditQuerySchema>;
+
+/** Cities are polygons in GeoJSON order `[lng, lat]` (task E8-07). */
+export const zoneUpsertSchema = z
+  .object({
+    slug: z
+      .string()
+      .trim()
+      .min(2)
+      .max(40)
+      .regex(/^[a-z0-9-]+$/, { message: 'SLUG_INVALID' }),
+    nameFa: z.string().trim().min(2).max(60),
+    city: z.string().trim().min(2).max(60),
+    province: z.string().trim().min(2).max(60),
+    isActive: z.boolean().default(true),
+    boundary: z
+      .array(z.tuple([z.number().min(-180).max(180), z.number().min(-90).max(90)]))
+      .min(3)
+      .max(200),
+  })
+  .strict();
+
+export type ZoneUpsertInput = z.infer<typeof zoneUpsertSchema>;
+
+/** SMS/gateway/map providers configured from the panel (task E8-06). */
+export const providerSettingSchema = z
+  .object({
+    provider: z
+      .string()
+      .trim()
+      .min(2)
+      .max(40)
+      .regex(/^[a-z0-9.-]+$/, { message: 'PROVIDER_INVALID' }),
+    kind: z.enum(['SMS', 'PAYMENT', 'MAP']),
+    isActive: z.boolean().default(false),
+    config: z.record(z.union([z.string().max(200), z.number(), z.boolean()])).default({}),
+  })
+  .strict();
+
+export type ProviderSettingInput = z.infer<typeof providerSettingSchema>;
+
+export const providerTestSchema = z.object({ phone: iranMobileSchema }).strict();
+
+export type ProviderTestInput = z.infer<typeof providerTestSchema>;
+
+/** One-command owner bootstrap (task E8-10). */
+export const createOwnerSchema = z
+  .object({
+    phone: iranMobileSchema,
+    displayName: z.string().trim().min(2).max(60).default('مالک بنزین'),
+  })
+  .strict();
+
+export type CreateOwnerInput = z.infer<typeof createOwnerSchema>;

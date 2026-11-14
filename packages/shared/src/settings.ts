@@ -68,3 +68,95 @@ export function withOverrides(
   }
   return next;
 }
+
+/**
+ * Presentation metadata for the admin panel (task E8-05). Grouping and Persian labels
+ * live next to the definitions so a new setting cannot ship without copy; the numeric
+ * bounds are read from the zod schema itself, never duplicated.
+ */
+export const SETTING_GROUPS = [
+  'ORDER',
+  'RESERVATION',
+  'TRADE',
+  'CHAT',
+  'AUTH',
+  'PRICING',
+  'PAYMENT',
+  'TRUST',
+  'GEO',
+  'OPS',
+] as const;
+export type SettingGroup = (typeof SETTING_GROUPS)[number];
+
+export const SETTING_META: Record<SettingKey, { labelFa: string; group: SettingGroup }> = {
+  'reservation.ttl_minutes': { labelFa: 'مهلت رزرو (دقیقه)', group: 'RESERVATION' },
+  'reservation.max_active_per_user': {
+    labelFa: 'حداکثر رزرو هم‌زمان هر کاربر',
+    group: 'RESERVATION',
+  },
+  'reservation.contact_window_minutes': {
+    labelFa: 'پنجره‌ی نمایش تماس (دقیقه)',
+    group: 'RESERVATION',
+  },
+  'owner.decision_ttl_minutes': { labelFa: 'مهلت تصمیم صاحب سفارش (دقیقه)', group: 'RESERVATION' },
+  'order.max_open_per_user': { labelFa: 'حداکثر سفارش باز هر کاربر', group: 'ORDER' },
+  'order.min_litres': { labelFa: 'حداقل حجم سفارش (لیتر)', group: 'ORDER' },
+  'order.max_litres': { labelFa: 'حداکثر حجم سفارش (لیتر)', group: 'ORDER' },
+  'order.default_expiry_hours': { labelFa: 'انقضای پیش‌فرض سفارش (ساعت)', group: 'ORDER' },
+  'order.rate_ceiling_tolerance_percent': { labelFa: 'رواداری سقف نرخ (درصد)', group: 'PRICING' },
+  'trade.auto_complete_hours': { labelFa: 'تکمیل خودکار معامله (ساعت)', group: 'TRADE' },
+  'chat.max_message_length': { labelFa: 'حداکثر طول پیام', group: 'CHAT' },
+  'notification.sms_enabled': { labelFa: 'ارسال پیامک فعال باشد', group: 'CHAT' },
+  'chat.quick_replies': { labelFa: 'پاسخ‌های آماده', group: 'CHAT' },
+  'otp.length': { labelFa: 'طول کد یک‌بارمصرف', group: 'AUTH' },
+  'otp.ttl_seconds': { labelFa: 'اعتبار کد (ثانیه)', group: 'AUTH' },
+  'otp.max_attempts': { labelFa: 'حداکثر تلاش کد', group: 'AUTH' },
+  'otp.resend_cooldown_seconds': { labelFa: 'فاصله‌ی ارسال مجدد (ثانیه)', group: 'AUTH' },
+  'auth.refresh_token_days': { labelFa: 'عمر نشست (روز)', group: 'AUTH' },
+  'pricing.low_price_warning_percent': { labelFa: 'هشدار قیمت پایین (درصد)', group: 'PRICING' },
+  'dispute.auto_review_hours': { labelFa: 'بازبینی خودکار اختلاف (ساعت)', group: 'OPS' },
+  'geo.default_radius_km': { labelFa: 'شعاع پیش‌فرض جستجو (کیلومتر)', group: 'GEO' },
+  'subscription.required_for_orders': {
+    labelFa: 'اشتراک برای ثبت سفارش الزامی باشد',
+    group: 'PAYMENT',
+  },
+  'payment.card_to_card_ttl_minutes': {
+    labelFa: 'مهلت پرداخت کارت‌به‌کارت (دقیقه)',
+    group: 'PAYMENT',
+  },
+  'payment.gateway_ttl_minutes': { labelFa: 'مهلت پرداخت درگاه (دقیقه)', group: 'PAYMENT' },
+  'payment.unique_suffix_max': { labelFa: 'حداکثر پسوند مبلغ یکتا', group: 'PAYMENT' },
+  'trust.suspend_below_score': { labelFa: 'تعلیق زیر امتیاز', group: 'TRUST' },
+  'trust.suspend_hours': { labelFa: 'مدت تعلیق (ساعت)', group: 'TRUST' },
+  'trust.window_days': { labelFa: 'پنجره‌ی محاسبه‌ی اعتبار (روز)', group: 'TRUST' },
+  'stats.window_days': { labelFa: 'پنجره‌ی آمار بازار (روز)', group: 'OPS' },
+};
+
+/** Shape of a setting editor rendered by the panel. */
+export type SettingKind = 'number' | 'boolean' | 'list';
+
+interface ZodDefLite {
+  typeName?: string;
+  checks?: { kind?: string; value?: unknown }[];
+}
+
+/** Zod 3 keeps `min`/`max` inside `_def.checks`; read them without hard-coding ranges. */
+export function settingBounds(key: SettingKey): { min: number | null; max: number | null } {
+  const schema = SETTING_DEFINITIONS[key].schema as unknown as { _def?: ZodDefLite };
+  let min: number | null = null;
+  let max: number | null = null;
+  for (const check of schema._def?.checks ?? []) {
+    if (typeof check.value !== 'number') continue;
+    if (check.kind === 'min') min = check.value;
+    if (check.kind === 'max') max = check.value;
+  }
+  return { min, max };
+}
+
+export function settingKind(key: SettingKey): SettingKind {
+  const schema = SETTING_DEFINITIONS[key].schema as unknown as { _def?: ZodDefLite };
+  const typeName = schema._def?.typeName;
+  if (typeName === 'ZodBoolean') return 'boolean';
+  if (typeName === 'ZodArray') return 'list';
+  return 'number';
+}

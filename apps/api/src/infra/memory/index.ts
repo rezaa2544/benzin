@@ -4,11 +4,13 @@ import type {
   DeviceRecord,
   Order,
   RefreshTokenRecord,
+  ProviderSetting,
   Reservation,
   SettingsRecord,
   User,
 } from '../../domain/entities.js';
 import type {
+  AuditQuery,
   AuditRepository,
   NewOrder,
   NewReservation,
@@ -20,12 +22,14 @@ import type {
   DeviceRepository,
   NewRefreshToken,
   OtpRepository,
+  ProviderSettingsRepository,
   RefreshTokenRepository,
   Repositories,
   ReservationRepository,
   SettingsRepository,
   SmsSender,
   UserRepository,
+  UserSearchQuery,
 } from '../../ports.js';
 import { ACTIVE_RESERVATION_STATUSES } from '@benzin/shared';
 import { MemoryConversationRepository, MemoryMessageRepository } from './chat.js';
@@ -85,6 +89,28 @@ export class MemoryUserRepository implements UserRepository {
 
   async list(limit: number): Promise<User[]> {
     return [...this.byId.values()].slice(0, limit).map(clone);
+  }
+
+  async search(query: UserSearchQuery): Promise<{ items: User[]; total: number }> {
+    const text = query.text?.trim() ?? '';
+    const matches = [...this.byId.values()]
+      .filter((user) => (query.role === null ? true : user.role === query.role))
+      .filter((user) => (query.status === null ? true : user.status === query.status))
+      .filter(
+        (user) =>
+          text.length === 0 || user.phone.includes(text) || (user.displayName ?? '').includes(text),
+      )
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    return {
+      items: matches.slice(query.offset, query.offset + query.limit).map(clone),
+      total: matches.length,
+    };
+  }
+
+  async countByStatus(): Promise<Record<User['status'], number>> {
+    const counts = { ACTIVE: 0, SUSPENDED: 0, BANNED: 0 } as Record<User['status'], number>;
+    for (const user of this.byId.values()) counts[user.status] += 1;
+    return counts;
   }
 
   async listSuspendedDue(now: Date, limit: number): Promise<User[]> {
@@ -321,6 +347,45 @@ export class MemoryOrderRepository implements OrderRepository {
     return clone(updated);
   }
 
+  async listAll(query: {
+    status: Order['status'] | null;
+    zoneId: string | null;
+    side: Order['side'] | null;
+    text: string | null;
+    limit: number;
+    offset: number;
+  }): Promise<{ items: Order[]; total: number }> {
+    const text = query.text?.trim() ?? '';
+    const matches = [...this.byId.values()]
+      .filter((order) => (query.status === null ? true : order.status === query.status))
+      .filter((order) => (query.zoneId === null ? true : order.zoneId === query.zoneId))
+      .filter((order) => (query.side === null ? true : order.side === query.side))
+      .filter(
+        (order) =>
+          text.length === 0 || order.id.includes(text) || (order.stationName ?? '').includes(text),
+      )
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    return {
+      items: matches.slice(query.offset, query.offset + query.limit).map(clone),
+      total: matches.length,
+    };
+  }
+
+  async countByStatus(): Promise<Record<Order['status'], number>> {
+    const counts: Record<Order['status'], number> = {
+      OPEN: 0,
+      RESERVED: 0,
+      CONFIRMED: 0,
+      AWAITING_OWNER_DECISION: 0,
+      DISPUTED: 0,
+      COMPLETED: 0,
+      CANCELLED: 0,
+      EXPIRED: 0,
+    };
+    for (const order of this.byId.values()) counts[order.status] += 1;
+    return counts;
+  }
+
   async listSince(zoneId: string, since: Date, limit: number): Promise<Order[]> {
     return [...this.byId.values()]
       .filter((order) => order.zoneId === zoneId && order.createdAt.getTime() >= since.getTime())
@@ -413,6 +478,10 @@ export class MemoryReservationRepository implements ReservationRepository {
       .map(clone);
   }
 
+  async countActive(): Promise<number> {
+    return [...this.byId.values()].filter((reservation) => this.isActive(reservation)).length;
+  }
+
   async listAll(limit: number): Promise<Reservation[]> {
     return [...this.byId.values()].slice(0, limit).map(clone);
   }
@@ -444,6 +513,53 @@ export class MemoryAuditRepository implements AuditRepository {
   async list(limit: number): Promise<AuditEntry[]> {
     return this.entries.slice(0, limit).map(clone);
   }
+
+  async query(input: AuditQuery): Promise<{ items: AuditEntry[]; total: number }> {
+    const matches = this.entries
+      .filter((entry) => input.action === null || entry.action.startsWith(input.action))
+      .filter((entry) => input.actorId === null || entry.actorId === input.actorId)
+      .filter((entry) => input.entity === null || entry.entity === input.entity);
+    return {
+      items: matches.slice(input.offset, input.offset + input.limit).map(clone),
+      total: matches.length,
+    };
+  }
+}
+
+/** Provider credentials edited from the panel; secrets are masked by the HTTP view. */
+export class MemoryProviderSettingsRepository implements ProviderSettingsRepository {
+  private readonly byId = new Map<string, ProviderSetting>();
+
+  async list(): Promise<ProviderSetting[]> {
+    return [...this.byId.values()]
+      .sort((a, b) => a.kind.localeCompare(b.kind) || a.provider.localeCompare(b.provider))
+      .map(clone);
+  }
+
+  async findBy(kind: ProviderSetting['kind'], provider: string): Promise<ProviderSetting | null> {
+    const found = [...this.byId.values()].find(
+      (setting) => setting.kind === kind && setting.provider === provider,
+    );
+    return found ? clone(found) : null;
+  }
+
+  async upsert(
+    input: Omit<ProviderSetting, 'id' | 'updatedAt'> & { id?: string },
+    at: Date,
+  ): Promise<ProviderSetting> {
+    const existing = await this.findBy(input.kind, input.provider);
+    const stored: ProviderSetting = {
+      id: existing?.id ?? input.id ?? randomUUID(),
+      provider: input.provider,
+      kind: input.kind,
+      config: input.config,
+      isActive: input.isActive,
+      updatedBy: input.updatedBy,
+      updatedAt: at,
+    };
+    this.byId.set(stored.id, clone(stored));
+    return clone(stored);
+  }
 }
 
 /** Development SMS sender: writes to the log so the OTP is visible without an account. */
@@ -468,6 +584,7 @@ export function createMemoryRepositories(): Repositories {
     subscriptions: new MemorySubscriptionRepository(),
     payments: new MemoryPaymentRepository(),
     paymentCards: new MemoryPaymentCardRepository(),
+    providerSettings: new MemoryProviderSettingsRepository(),
     otps: new MemoryOtpRepository(),
     refreshTokens: new MemoryRefreshTokenRepository(),
     devices: new MemoryDeviceRepository(),

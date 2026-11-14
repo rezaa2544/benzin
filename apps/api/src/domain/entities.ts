@@ -205,6 +205,20 @@ export interface SettingsRecord {
   updatedBy: string | null;
 }
 
+/**
+ * Runtime provider configuration editable from the panel (task E8-06): SMS gateway,
+ * payment gateway or map provider credentials and switches.
+ */
+export interface ProviderSetting {
+  readonly id: string;
+  provider: string;
+  kind: 'SMS' | 'PAYMENT' | 'MAP';
+  config: Record<string, unknown>;
+  isActive: boolean;
+  updatedBy: string | null;
+  updatedAt: Date;
+}
+
 export interface AuditEntry {
   readonly id: string;
   readonly actorId: string | null;

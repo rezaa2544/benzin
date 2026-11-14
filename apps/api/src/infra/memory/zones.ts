@@ -28,6 +28,12 @@ export class MemoryZoneRepository implements ZoneRepository {
     return [...this.byId.values()].filter((zone) => zone.isActive).map(clone);
   }
 
+  async listAll(): Promise<ZoneRecord[]> {
+    return [...this.byId.values()]
+      .sort((a, b) => a.nameFa.localeCompare(b.nameFa, 'fa'))
+      .map(clone);
+  }
+
   async upsert(zone: ZoneRecord): Promise<ZoneRecord> {
     this.byId.set(zone.id, clone(zone));
     return clone(zone);

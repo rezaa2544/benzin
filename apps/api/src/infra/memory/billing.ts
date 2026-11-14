@@ -105,6 +105,29 @@ export class MemorySubscriptionRepository implements SubscriptionRepository {
       .slice(0, limit)
       .map(clone);
   }
+
+  async listAll(query: {
+    status: Subscription['status'] | null;
+    limit: number;
+    offset: number;
+  }): Promise<{ items: Subscription[]; total: number }> {
+    const matches = [...this.byId.values()]
+      .filter((subscription) => query.status === null || subscription.status === query.status)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    return {
+      items: matches.slice(query.offset, query.offset + query.limit).map(clone),
+      total: matches.length,
+    };
+  }
+
+  async countByStatus(): Promise<Record<Subscription['status'], number>> {
+    const counts = { PENDING: 0, ACTIVE: 0, EXPIRED: 0, CANCELLED: 0 } as Record<
+      Subscription['status'],
+      number
+    >;
+    for (const subscription of this.byId.values()) counts[subscription.status] += 1;
+    return counts;
+  }
 }
 
 export class MemoryPaymentRepository implements PaymentRepository {
@@ -188,12 +211,46 @@ export class MemoryPaymentRepository implements PaymentRepository {
       .map(clone);
   }
 
-  async listAll(options: { status: Payment['status'] | null; limit: number }): Promise<Payment[]> {
+  async listAll(options: {
+    status: Payment['status'] | null;
+    limit: number;
+    offset?: number;
+  }): Promise<Payment[]> {
+    const start = options.offset ?? 0;
     return [...this.byId.values()]
       .filter((payment) => options.status === null || payment.status === options.status)
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-      .slice(0, options.limit)
+      .slice(start, start + options.limit)
       .map(clone);
+  }
+
+  async summary(since: Date): Promise<{
+    paidCount: number;
+    paidToman: number;
+    pendingCount: number;
+    failedCount: number;
+    expiredCount: number;
+  }> {
+    const summary = {
+      paidCount: 0,
+      paidToman: 0,
+      pendingCount: 0,
+      failedCount: 0,
+      expiredCount: 0,
+    };
+    for (const payment of this.byId.values()) {
+      if (payment.status === 'PENDING') summary.pendingCount += 1;
+      if (payment.status === 'FAILED') summary.failedCount += 1;
+      if (payment.status === 'EXPIRED') summary.expiredCount += 1;
+      if (
+        payment.status === 'PAID' &&
+        (payment.paidAt ?? payment.createdAt).getTime() >= since.getTime()
+      ) {
+        summary.paidCount += 1;
+        summary.paidToman += payment.amountToman;
+      }
+    }
+    return summary;
   }
 }
 

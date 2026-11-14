@@ -1,4 +1,4 @@
-import type { CancelReason } from './enums.js';
+import type { CancelReason, UserRole } from './enums.js';
 import { formatRate } from './format.js';
 
 /**
@@ -26,6 +26,8 @@ export const NOTIFICATION_KINDS = [
   'PAYMENT_APPROVED',
   'PAYMENT_FAILED',
   'SUBSCRIPTION_EXPIRED',
+  'DISPUTE_RESOLVED',
+  'ACCOUNT_ROLE_CHANGED',
 ] as const;
 
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
@@ -122,11 +124,30 @@ export const NOTIFICATION_TEMPLATES: Record<NotificationKind, NotificationTempla
     bodyFa: 'اشتراک «{plan}» شما به پایان رسید. برای ادامه، اشتراک را تمدید کنید.',
     smsFa: null,
   },
+  DISPUTE_RESOLVED: {
+    titleFa: 'اختلاف بسته شد',
+    bodyFa: 'کارشناسان بنزین اختلاف سفارش {litres} لیتری را بررسی کردند: {outcome}.',
+    smsFa: null,
+  },
+  ACCOUNT_ROLE_CHANGED: {
+    titleFa: 'نقش حساب شما تغییر کرد',
+    bodyFa:
+      'نقش حساب شما به «{role}» تغییر یافت. اگر این تغییر را انجام نداده‌اید با پشتیبانی تماس بگیرید.',
+    smsFa: null,
+  },
   ACCOUNT_RESTORED: {
     titleFa: 'تعلیق حساب برداشته شد',
     bodyFa: 'محدودیت حساب شما پایان یافت. امتیاز اعتبار: {score}.',
     smsFa: 'تعلیق حساب شما برداشته شد. بنزین',
   },
+};
+
+/** Persian labels for roles shown in account notifications (task E8-02). */
+export const USER_ROLE_FA: Record<UserRole, string> = {
+  USER: 'کاربر',
+  SUPPORT: 'پشتیبانی',
+  ADMIN: 'مدیر',
+  OWNER: 'مالک',
 };
 
 /** Persian labels for the cancel reasons clients pick from. */
